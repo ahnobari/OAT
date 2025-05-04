@@ -45,14 +45,14 @@ class DDIMPipeline:
         
         bs = sample.shape[0]
         timesteps = torch.randint(
-                    0, self.TrainScheduler.config.num_train_timesteps, (bs,), device=self.device,
+                    0, self.TrainScheduler.config.num_train_timesteps, (bs,), device=model.device,
                     dtype=torch.long
                 )
         noise = torch.randn_like(sample) if noise is None else noise
         
         noisy_sample = self.TrainScheduler.add_noise(sample, noise, timesteps)
         
-        pred = model(noisy_sample, timesteps, **kwargs)
+        pred = model(noisy_sample, timesteps, **kwargs)[0]
         
         target = self.get_target(sample, noise, timesteps)
         

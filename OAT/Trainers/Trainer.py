@@ -203,7 +203,7 @@ class Trainer:
                                 loss_dict = self.custom_loss(self.model, inputs_batch)
                             else:
                                 loss_dict = self.custom_loss(self.model, **inputs_batch)
-                        if dict_input:
+                        elif dict_input:
                             loss_dict = self.model(**inputs_batch, compute_loss=True)[1]
                         else:
                             loss_dict = self.model(inputs_batch, compute_loss=True)[1]
@@ -215,7 +215,7 @@ class Trainer:
                             loss_dict = self.custom_loss(self.model, **inputs_batch)
                         else:
                             loss_dict = self.custom_loss(self.model, inputs_batch)
-                    if dict_input:
+                    elif dict_input:
                         loss_dict = self.model(**inputs_batch, compute_loss=True)[1]
                     else:
                         loss_dict = self.model(inputs_batch, compute_loss=True)[1]

@@ -9,6 +9,43 @@ import matplotlib.pyplot as plt
 from tqdm.auto import trange
 from ._utils import *
 
+def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='pre_training', **kawrgs):
+    if split == 'test':
+        if subset == 'DOMTopoDiff':
+            data_path = os.path.join(data_path,'DOMTopoDiff', 'Test')
+        else:
+            data_path = os.path.join(data_path,'test_data')
+    elif subset=="labeled":
+        data_path = os.path.join(data_path,'labeled_data')
+    elif subset=="DOMTopoDiff":
+        data_path = os.path.join(data_path,'DOMTopoDiff')
+        
+    print(f"Loading data from {data_path}")
+    
+    tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
+    shapes = np.load(os.path.join(data_path,'shapes.npy'))
+    bcs = np.load(os.path.join(data_path,'bcs.npy'), allow_pickle=True)
+    vfs = np.load(os.path.join(data_path,'vfs.npy'), allow_pickle=True)
+    loads = np.load(os.path.join(data_path,'loads.npy'), allow_pickle=True)
+    
+    tensors = []
+    
+    for i in trange(len(tops), desc="Processing tensors"):
+        tensors.append(torch.tensor(tops[i].reshape(shapes[i])[None]*255, dtype=torch.uint8))
+    
+    # dataset = AEDataset(tensors=tensors, **kawrgs)
+    latents = torch.load(latents_path)
+    
+    dataset = DiffDataset(
+        tensors=tensors,
+        latent_tensors=latents,
+        BCs=[bcs,loads],
+        Cs=[vfs, shapes/shapes.max(1)[:,None]],
+        **kawrgs
+    )
+    
+    return dataset
+
 class DiffDataset(Dataset):
     """
     Diffusion Dataset for Latent Diffusion (Conditional and Unconditional)
@@ -20,6 +57,8 @@ class DiffDataset(Dataset):
                  BCs = [],
                  Cs = [],
                  unconditional_prob=0.0,
+                 BC_dropout_prob=0.0,
+                 C_dropout_prob=0.0,
                  ):
         
         self.tensors = tensors  # List of CHW tensors, uint8 [0, 255]
@@ -27,6 +66,8 @@ class DiffDataset(Dataset):
         self.BCs = BCs
         self.Cs = Cs
         self.unconditional_prob = unconditional_prob
+        self.BC_dropout_prob = BC_dropout_prob
+        self.C_dropout_prob = C_dropout_prob
         
         self.n_BC = len(BCs)
         self.n_C = len(Cs)
@@ -102,23 +143,20 @@ class DiffDataset(Dataset):
         Cs = []
         for i in range(self.n_C):
             Cs.append(np.array(self.Cs[i][idx]))
+            if np.random.rand() < self.C_dropout_prob:
+                Cs[i] = np.zeros_like(Cs[i]) - 1.0
         
         BCs = []
         sizes = []
         for i in range(self.n_BC):
             BCs.append(np.array(self.BCs[i][idx]))
             sizes.append(self.BCs[i][idx].shape[0])
-        
-        input_img = self.latent_tensors[idx]
-        Cs = []
-        for i in range(self.n_C):
-            Cs.append(np.array(self.Cs[i][idx]))
-        
-        BCs = []
-        sizes = []
-        for i in range(self.n_BC):
-            BCs.append(np.array(self.BCs[i][idx]))
-            sizes.append(self.BCs[i][idx].shape[0])
+            
+            if np.random.rand() < self.BC_dropout_prob:
+                BC_size = list(BCs[i].shape)
+                BC_size[0] = 1
+                BCs[i] = np.zeros(BC_size) - 1.0
+                sizes[i] = 1
         
         return {
             'input_img': input_img,

@@ -11,7 +11,10 @@ from ._utils import *
 
 def load_OAT_AE(data_path='Dataset', split='train', subset='pre_training', **kawrgs):
     if split == 'test':
-        data_path = os.path.join(data_path,'test_data')
+        if subset == 'DOMTopoDiff':
+            data_path = os.path.join(data_path,'DOMTopoDiff', 'Test')
+        else:
+            data_path = os.path.join(data_path,'test_data')
     elif subset=='pre_training':
         data_path = os.path.join(data_path,'pre_training')
     elif subset=="labeled":
