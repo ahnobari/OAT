@@ -46,13 +46,19 @@ dataset = load_OAT_AE(data_path=args.dataset_path,
 
 model = NFAE(resolution=args.encoder_res)
 
+max_scheduler_steps = (args.num_epochs * len(dataset) + args.batch_size - 1) // args.batch_size
+
+if args.multi_gpu:
+    n_devices = torch.cuda.device_count()
+    max_scheduler_steps = (max_scheduler_steps + n_devices - 1) // n_devices
+
 trainer = Trainer(model, 
                   multi_gpu=args.multi_gpu,
                   DDP_train=args.DDP,
                   lr=args.lr,
                   cosine_schedule=args.cosine_scheduler,
                   lr_final=args.final_lr, 
-                  schedule_max_steps=args.num_epochs,
+                  schedule_max_steps=max_scheduler_steps,
                   Compile=args.compile,
                   mixed_precision=args.mixed_precision,
                   optimizer=args.optimizer)

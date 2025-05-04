@@ -12,18 +12,22 @@ import torch.distributed as dist
 import bitsandbytes as bnb
 import torch_optimizer as topt
 import os
+from diffusers.optimization import get_cosine_schedule_with_warmup
+from typing import Optional
 
 class Trainer:
     def __init__(self, model: nn.Module, lr: float = 1e-4, weight_decay: float = 1e-4,
                  cosine_schedule: bool = True, lr_final: float = 1e-5, schedule_max_steps: int = 100,
                  warmup_steps: int = 200, device: str = None, multi_gpu: bool = False, mixed_precision: bool = True,
                  DDP_train: bool = True, Compile: bool = True, checkpoint_path: str = None,
-                 optimizer: str = 'AdamW'):
+                 optimizer: str = 'AdamW', custom_loss: Optional[callable] = None):
         
         self.multi_gpu = multi_gpu
         self.DDP = DDP_train if multi_gpu else False
         self.mixed_precision = mixed_precision
         self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
+        self.custom_loss = custom_loss
         
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -66,8 +70,10 @@ class Trainer:
         self.lr_final = lr_final
         self.schedule_max_steps = schedule_max_steps
         
-        if self.cosine_schedule:
+        if self.cosine_schedule and self.warmup_steps == 0:
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=schedule_max_steps, eta_min=lr_final)
+        elif self.cosine_schedule and self.warmup_steps > 0:
+            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, num_warmup_steps=warmup_steps, num_training_steps=schedule_max_steps)
         else:
             self.scheduler = None
         
@@ -149,12 +155,14 @@ class Trainer:
         elif self.optimizer == 'Adafactor':
             self.optimizer = topt.Adafactor(param_list, lr=self.lr, weight_decay=self.weight_decay)
         
-        if self.cosine_schedule:
+        if self.cosine_schedule and self.warmup_steps == 0:
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.schedule_max_steps, eta_min=self.lr_final)
+        elif self.cosine_schedule and self.warmup_steps > 0:
+            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, num_warmup_steps=self.warmup_steps, num_training_steps=self.schedule_max_steps)
         else:
             self.scheduler = None
             
-    def train(self, dataset, data_idx, batch_size, epochs=100, continue_loop=True, verbose=True, checkpoint_interval=10, checkpoint_dir='Checkpoints', **kwargs):
+    def train(self, dataset, data_idx, batch_size, epochs=100, continue_loop=True, verbose=True, checkpoint_interval=10, checkpoint_dir='Checkpoints', dict_input=False, **kwargs):
         
         if not continue_loop:
             self.model.train()
@@ -190,26 +198,32 @@ class Trainer:
                 
                 if self.mixed_precision:
                     with torch.amp.autocast("cuda"):
-                        if self.multi_gpu:
-                            loss_dict = self.model(inputs_batch, compute_loss=True)[1]
+                        if self.custom_loss is not None:
+                            if not dict_input:
+                                loss_dict = self.custom_loss(self.model, inputs_batch)
+                            else:
+                                loss_dict = self.custom_loss(self.model, **inputs_batch)
+                        if dict_input:
+                            loss_dict = self.model(**inputs_batch, compute_loss=True)[1]
                         else:
                             loss_dict = self.model(inputs_batch, compute_loss=True)[1]
+                        
                         loss = loss_dict['loss']
                 else:
-                    if self.multi_gpu:
-                        loss_dict = self.model(inputs_batch, compute_loss=True)[1]
+                    if self.custom_loss is not None:
+                        if dict_input:
+                            loss_dict = self.custom_loss(self.model, **inputs_batch)
+                        else:
+                            loss_dict = self.custom_loss(self.model, inputs_batch)
+                    if dict_input:
+                        loss_dict = self.model(**inputs_batch, compute_loss=True)[1]
                     else:
                         loss_dict = self.model(inputs_batch, compute_loss=True)[1]
+                    
                     loss = loss_dict['loss']
                     
                 if self.mixed_precision:
                     scaler.scale(loss).backward()
-                    
-                    for p in self.model.parameters():
-                        if p.grad is not None:
-                            p.grad.data.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
-                    
-                    
                     scaler.step(self.optimizer)
                     scaler.update()
                 else:
@@ -228,9 +242,7 @@ class Trainer:
                         
                     prog.set_postfix_str(post_fix_str)
                     
-            if self.cosine_schedule:
-                curent_step = self.current_epoch
-                if curent_step <= self.schedule_max_steps:
+                if self.cosine_schedule:
                     self.scheduler.step()
                     
             self.current_epoch += 1
