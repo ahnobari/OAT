@@ -75,3 +75,23 @@ def make_coord_cell_grid(size, range=(-1, 1)):
     
     return coord, cell
 
+class BatchDict(dict):
+    """
+    A dictionary that allows for attribute-style access to its keys.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+        
+    def to(self, device):
+        """
+        Move all tensors in the dictionary to the specified device.
+        """
+        for key, value in self.items():
+            if isinstance(value, torch.Tensor):
+                self[key] = value.to(device)
+            elif isinstance(value, list):
+                self[key] = [v.to(device) if isinstance(v, torch.Tensor) else v for v in value]
+            elif isinstance(value, dict):
+                self[key] = BatchDict(value).to(device)
+        return self

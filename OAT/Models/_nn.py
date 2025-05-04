@@ -4,116 +4,13 @@ import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
 import functools
+from collections import namedtuple
+from torchvision import models
 
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0)
-
-def Normalize(in_channels, num_groups=32):
-    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
-
-def nonlinearity(x):
-    # swish
-    return x*torch.sigmoid(x)
-
-def make_attn(in_channels, attn_type="vanilla"):
-    assert attn_type in ["vanilla", "linear", "none"], f'attn_type {attn_type} unknown'
-    # print(f"making attention of type '{attn_type}' with {in_channels} in_channels")
-    if attn_type == "vanilla":
-        return AttnBlock(in_channels)
-    elif attn_type == "none":
-        return nn.Identity(in_channels)
-    else:
-        return LinearAttention(dim = in_channels, heads=1, dim_head=in_channels)
-
-def make_coord_grid(shape, range=(-1, 1), device='cpu'):
-    """
-        Args:
-            shape: (s_1, ..., s_k), grid shape
-            range: range for each axis, list or tuple, [minv, maxv] or [[minv_1, maxv_1], ..., [minv_k, maxv_k]]
-        Returns:
-            (s_1, ..., s_k, k), coordinate grid
-    """
-    l_lst = []
-    for i, s in enumerate(shape):
-        l = (0.5 + torch.arange(s, device=device)) / s
-        if isinstance(range[0], list) or isinstance(range[0], tuple):
-            minv, maxv = range[i]
-        else:
-            minv, maxv = range
-        l = minv + (maxv - minv) * l
-        l_lst.append(l)
-    grid = torch.stack(torch.meshgrid(*l_lst, indexing='ij'), dim=-1)
-    return grid
-
-def make_coord_cell_grid(shape, range=(-1, 1), device='cpu', bs=None):
-    coord = make_coord_grid(shape, range=range, device=device)
-    cell = torch.ones_like(coord)
-    for i, s in enumerate(shape):
-        if isinstance(range[0], list) or isinstance(range[0], tuple):
-            minv, maxv = range[i]
-        else:
-            minv, maxv = range
-        cell[..., i] *= (maxv - minv) / s
-    if bs is not None:
-        coord = coord.unsqueeze(0).expand(bs, *([-1] * coord.dim()))
-        cell = cell.unsqueeze(0).expand(bs, *([-1] * cell.dim()))
-    return coord, cell
-
-def convert_posenc(x, dim, w_max):
-    """
-        Args:
-            x: (..., d)
-            dim: PE dimension
-            w_max: the PE weights are (np.pi * w_i * x), where w_i are exponentially increasing in range [1, w_max]
-        Returns:
-            (..., d * dim), new x
-    """
-    assert dim % 2 == 0 # cos and sin each take half
-    w = torch.exp(torch.linspace(0, np.log(w_max), dim // 2, device=x.device))
-    x = torch.matmul(x.unsqueeze(-1), w.unsqueeze(0)).view(*x.shape[:-1], -1)
-    x = torch.cat([torch.cos(np.pi * x), torch.sin(np.pi * x)], dim=-1)
-    return x
-
-
-def convert_liif_feat_coord_cell(feat, coord, cell):
-    """
-        Get LIIF rawmap of coord, cell on feat.
-
-        Args:
-            feat: (B, C, H, W)
-            coord, cell: (B, ..., 2), assume range [-1, 1]
-        Returns:
-            q_feat, rel_coord, rel_cell: (B, ..., C/2/2)
-    """
-    B = feat.shape[0]
-    device = feat.device
-    query_shape = coord.shape[1: -1]
-    coord = coord.view(B, 1, -1, 2)
-    cell = cell.view(B, 1, -1, 2)
-
-    feat_coord = (make_coord_grid(feat.shape[-2:], device=device)
-        .permute(2, 0, 1).unsqueeze(0).expand(B, -1, -1, -1)) # B 2 H W
-
-    q_feat = F.grid_sample(feat, coord.flip(-1), mode='nearest', align_corners=False).permute(0, 2, 3, 1) # B 1 n C
-    q_coord = F.grid_sample(feat_coord, coord.flip(-1), mode='nearest', align_corners=False).permute(0, 2, 3, 1) # B 1 n 2
-
-    rel_coord = coord - q_coord
-    rel_coord[..., 0] *= feat.shape[-2]
-    rel_coord[..., 1] *= feat.shape[-1]
-
-    rel_cell = cell.clone()
-    rel_cell[..., 0] *= feat.shape[-2]
-    rel_cell[..., 1] *= feat.shape[-1]
-
-    q_feat = q_feat.view(B, *query_shape, -1)
-    rel_coord = rel_coord.view(B, *query_shape, 2)
-    rel_cell = rel_cell.view(B, *query_shape, 2)
-    return q_feat, rel_coord, rel_cell
+'''
+This code is heavily inspired by the Image Neural Field Diffusion model and their CLIF approach. This is found in the paper's official repository. This repository can be found at:
+https://github.com/yinboc/infd
+'''
 
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads=4, dim_head=32):
@@ -132,7 +29,16 @@ class LinearAttention(nn.Module):
         out = torch.einsum('bhde,bhdn->bhen', context, q)
         out = rearrange(out, 'b heads c (h w) -> b (heads c) h w', heads=self.heads, h=h, w=w)
         return self.to_out(out)
-    
+
+def nonlinearity(x):
+    # swish
+    return x*torch.sigmoid(x)
+
+
+def Normalize(in_channels, num_groups=32):
+    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
+
+
 class Upsample(nn.Module):
     def __init__(self, in_channels, with_conv):
         super().__init__()
@@ -212,7 +118,7 @@ class ResnetBlock(nn.Module):
                                                     stride=1,
                                                     padding=0)
 
-    def forward(self, x, temb):
+    def forward(self, x, temb=None):
         h = x
         h = self.norm1(h)
         h = nonlinearity(h)
@@ -233,7 +139,14 @@ class ResnetBlock(nn.Module):
                 x = self.nin_shortcut(x)
 
         return x+h
-    
+
+
+class LinAttnBlock(LinearAttention):
+    """to match AttnBlock usage"""
+    def __init__(self, in_channels):
+        super().__init__(dim=in_channels, heads=1, dim_head=in_channels)
+
+
 class AttnBlock(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -400,3 +313,145 @@ class NLayerDiscriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.main(input)
+
+def make_coord_grid(shape, range=(-1, 1), device='cpu'):
+    """
+        Args:
+            shape: (s_1, ..., s_k), grid shape
+            range: range for each axis, list or tuple, [minv, maxv] or [[minv_1, maxv_1], ..., [minv_k, maxv_k]]
+        Returns:
+            (s_1, ..., s_k, k), coordinate grid
+    """
+    l_lst = []
+    for i, s in enumerate(shape):
+        l = (0.5 + torch.arange(s, device=device)) / s
+        if isinstance(range[0], list) or isinstance(range[0], tuple):
+            minv, maxv = range[i]
+        else:
+            minv, maxv = range
+        l = minv + (maxv - minv) * l
+        l_lst.append(l)
+    grid = torch.stack(torch.meshgrid(*l_lst, indexing='ij'), dim=-1)
+    return grid
+
+def convert_posenc(x, dim, w_max):
+    """
+        Args:
+            x: (..., d)
+            dim: PE dimension
+            w_max: the PE weights are (np.pi * w_i * x), where w_i are exponentially increasing in range [1, w_max]
+        Returns:
+            (..., d * dim), new x
+    """
+    assert dim % 2 == 0 # cos and sin each take half
+    w = torch.exp(torch.linspace(0, np.log(w_max), dim // 2, device=x.device))
+    x = torch.matmul(x.unsqueeze(-1), w.unsqueeze(0)).view(*x.shape[:-1], -1)
+    x = torch.cat([torch.cos(np.pi * x), torch.sin(np.pi * x)], dim=-1)
+    return x
+
+
+def convert_liif_feat_coord_cell(feat, coord, cell):
+    """
+        Get LIIF rawmap of coord, cell on feat.
+
+        Args:
+            feat: (B, C, H, W)
+            coord, cell: (B, ..., 2), assume range [-1, 1]
+        Returns:
+            q_feat, rel_coord, rel_cell: (B, ..., C/2/2)
+    """
+    B = feat.shape[0]
+    device = feat.device
+    query_shape = coord.shape[1: -1]
+    coord = coord.view(B, 1, -1, 2)
+    cell = cell.view(B, 1, -1, 2)
+
+    feat_coord = (make_coord_grid(feat.shape[-2:], device=device)
+        .permute(2, 0, 1).unsqueeze(0).expand(B, -1, -1, -1)) # B 2 H W
+
+    q_feat = F.grid_sample(feat, coord.flip(-1), mode='nearest', align_corners=False).permute(0, 2, 3, 1) # B 1 n C
+    q_coord = F.grid_sample(feat_coord, coord.flip(-1), mode='nearest', align_corners=False).permute(0, 2, 3, 1) # B 1 n 2
+
+    rel_coord = coord - q_coord
+    rel_coord[..., 0] *= feat.shape[-2]
+    rel_coord[..., 1] *= feat.shape[-1]
+
+    rel_cell = cell.clone()
+    rel_cell[..., 0] *= feat.shape[-2]
+    rel_cell[..., 1] *= feat.shape[-1]
+
+    q_feat = q_feat.view(B, *query_shape, -1)
+    rel_coord = rel_coord.view(B, *query_shape, 2)
+    rel_cell = rel_cell.view(B, *query_shape, 2)
+    return q_feat, rel_coord, rel_cell
+
+
+'''
+Contrastive Latent Mapping Layers
+'''
+
+class BC_Encoder(nn.Module):
+    '''
+    Boundary-Condition Encoder (point cloud based)
+    '''
+    def __init__(self, mlp_layers):
+        super(BC_Encoder, self).__init__()
+        self.mlp = nn.ModuleList()
+        self.layer_norms = nn.ModuleList()
+        for i in range(len(mlp_layers) - 1):
+            self.mlp.append(nn.Linear(mlp_layers[i], mlp_layers[i+1]))
+            # Add Layer Normalization except for the last layer
+            if i < len(mlp_layers) - 2:
+                self.layer_norms.append(nn.LayerNorm(mlp_layers[i+1]))
+
+    def forward(self, positions, batch_index):
+        # Apply MLP with Layer Normalization and ReLU to positions
+        x = positions
+        for i, layer in enumerate(self.mlp):
+            x = layer(x)
+            if i < len(self.mlp) - 1:  # Apply normalization and ReLU except for the last layer
+                x = self.layer_norms[i](x)
+                x = F.relu(x)
+
+        batch_size = int(batch_index.max().item() + 1)
+        pooled = []
+        for index in range(batch_size):
+            mask = (batch_index == index).squeeze()
+            batch_x = x[mask]
+
+            mean_pool = batch_x.mean(dim=0).squeeze()
+            max_pool = batch_x.max(dim=0)[0].squeeze()
+            min_pool = batch_x.min(dim=0)[0].squeeze()
+
+            # Concatenate pooled features
+            pooled_features = torch.cat((mean_pool, max_pool, min_pool), dim=0)
+            pooled.append(pooled_features)
+
+        # Stack pooled outputs for each set in the batch
+        output = torch.stack(pooled)
+    
+        return output
+    
+class C_Encoder(nn.Module):
+    '''
+    Condition Encoder
+    '''
+    def __init__(self, mlp_layers):
+        super(C_Encoder, self).__init__()
+        self.mlp = nn.ModuleList()
+        self.layer_norms = nn.ModuleList()
+        for i in range(len(mlp_layers) - 1):
+            self.mlp.append(nn.Linear(mlp_layers[i], mlp_layers[i+1]))
+            # Add Layer Normalization except for the last layer
+            if i < len(mlp_layers) - 2:
+                self.layer_norms.append(nn.LayerNorm(mlp_layers[i+1]))
+
+    def forward(self, inputs):
+        # Apply MLP with Layer Normalization and ReLU to inputs
+        x = inputs
+        for i, layer in enumerate(self.mlp):
+            x = layer(x)
+            if i < len(self.mlp) - 1:
+                x = self.layer_norms[i](x)
+                x = F.relu(x)
+        return x

@@ -1,23 +1,24 @@
 import os
 import random
-from PIL import Image, ImageFile
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 import numpy as np
 from functools import partial
-from ._utils import make_coord_cell_grid, get_center_pad_info
-from tqdm.auto import trange
 import matplotlib.pyplot as plt
+from tqdm.auto import trange
+from ._utils import *
 
-def load_OAT_AE(data_path='dataset', split='train', subset='pre_training', **kawrgs):
+def load_OAT_AE(data_path='Dataset', split='train', subset='pre_training', **kawrgs):
     if split == 'test':
         data_path = os.path.join(data_path,'test_data')
     elif subset=='pre_training':
         data_path = os.path.join(data_path,'pre_training')
     elif subset=="labeled":
         data_path = os.path.join(data_path,'labeled_data')
-    
+    elif subset=="DOMTopoDiff":
+        data_path = os.path.join(data_path,'DOMTopoDiff')
+        
     print(f"Loading data from {data_path}")
     
     tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
@@ -28,13 +29,14 @@ def load_OAT_AE(data_path='dataset', split='train', subset='pre_training', **kaw
     for i in trange(len(tops), desc="Processing tensors"):
         tensors.append(torch.tensor(tops[i].reshape(shapes[i])[None]*255, dtype=torch.uint8))
     
-    dataset = UnifiedINFDPreLoadedDataset(tensors=tensors,**kawrgs)
+    dataset = AEDataset(tensors=tensors, **kawrgs)
     
     return dataset
     
-class UnifiedINFDPreLoadedDataset(Dataset):
+
+class AEDataset(Dataset):
     """
-    Unified dataset class for INFD that works with preloaded torch tensors.
+    Unified dataset class for Auto Encoder that works with preloaded torch tensors.
     Expects a list of uint8 CHW tensors with values [0, 255]
     """
     
@@ -42,14 +44,13 @@ class UnifiedINFDPreLoadedDataset(Dataset):
                  tensors,
                  encoder_res=256,
                  patch_size=32,
-                 resize_gt_lb=256,
+                 resize_gt_lb=64,
                  resize_gt_ub=1024,
-                 max_downscale=2,
                  p_whole=0.0,
-                 p_max=0.0,
+                 p_max=1.0,
                  square_crop=False,
                  full_sampling=False,
-                 n_patches=4):
+                 square_sampling=False):
         
         self.tensors = tensors  # List of CHW tensors, uint8 [0, 255]
         self.encoder_res = encoder_res
@@ -60,13 +61,7 @@ class UnifiedINFDPreLoadedDataset(Dataset):
         self.p_max = p_max
         self.square_crop = square_crop
         self.full_sampling = full_sampling
-        self.n_patches = n_patches
-        self.max_downscale = max_downscale
-        
-        if self.full_sampling:
-            if self.n_patches != 1:
-                print("Warning: number of patches is set to 1 for full sampling. Setting n_patches to 1.")
-                self.n_patches = 1
+        self.square_sampling = square_sampling
         
         # Set up transforms
         self.normalize = transforms.Normalize(0.5, 0.5)
@@ -100,22 +95,72 @@ class UnifiedINFDPreLoadedDataset(Dataset):
         img = self.normalize(img)  # [-1,1]
         return img
     
-    def __getitem__(self, idx):
-        out = self.__getpatch__(idx)
-        out['gt'] = out['gt'].unsqueeze(0)  # Add batch dimension
-        out['gt_coord'] = out['gt_coord'].unsqueeze(0)  # Add batch dimension
-        out['gt_cell'] = out['gt_cell'].unsqueeze(0)  # Add batch dimension
+    @staticmethod
+    def _collate_inf(batch):
+        input_images = torch.stack([b['inp'] for b in batch])
         
-        for i in range(self.n_patches-1):
-            temp = self.__getpatch__(idx)
-            out['gt'] = torch.cat((out['gt'], temp['gt'][None]), dim=0)
-            out['gt_coord'] = torch.cat((out['gt_coord'], temp['gt_coord'][None]), dim=0)
-            out['gt_cell'] = torch.cat((out['gt_cell'], temp['gt_cell'][None]), dim=0)
-            
-        out['idx'] = idx
+        out = {
+            'inp': input_images
+        }
+        
         return out
     
-    def __getpatch__(self, idx):
+    @staticmethod
+    def _collate_fn(batch):
+        
+        input_images = torch.stack([b['inp'] for b in batch])
+        
+        # check if all tensors are the same size
+        multi_size = False
+        max_shape = [batch[0]['gt'].shape[1], batch[0]['gt'].shape[2]]
+        sizes = []
+        for b in batch:
+            if not multi_size:
+                if b['gt'].shape[1] != max_shape[0] or b['gt'].shape[2] != max_shape[1]:
+                    multi_size = True
+            
+            if b['gt'].shape[1] > max_shape[0]:
+                max_shape[0] = b['gt'].shape[1]
+            if b['gt'].shape[2] > max_shape[1]:
+                max_shape[1] = b['gt'].shape[2]
+            sizes.append((b['gt'].shape[1], b['gt'].shape[2]))
+        
+        if multi_size:
+            # pad all tensors to the max size and make a mask
+            gt_images = torch.zeros(len(batch), 1, max_shape[0], max_shape[1])
+            gt_coords = torch.zeros(len(batch), max_shape[0], max_shape[1], 2)
+            gt_cells = torch.zeros(len(batch), max_shape[0], max_shape[1], 2)
+            masks = torch.zeros(len(batch), 1, max_shape[0], max_shape[1], dtype=torch.bool)
+            for i, b in enumerate(batch):
+                gt_images[i, :, :b['gt'].shape[1], :b['gt'].shape[2]] = b['gt']
+                gt_coords[i, :b['gt_coord'].shape[0], :b['gt_coord'].shape[1], :] = b['gt_coord']
+                gt_cells[i, :b['gt_cell'].shape[0], :b['gt_cell'].shape[1], :] = b['gt_cell']
+                masks[i, :, :b['gt'].shape[1], :b['gt'].shape[2]] = True
+                
+            out = {
+                'inp': input_images,
+                'gt': gt_images,
+                'gt_coord': gt_coords,
+                'gt_cell': gt_cells,
+                'mask': masks,
+                'sizes': torch.tensor(sizes, dtype=torch.int32)
+            }
+            
+        else:
+            gt_images = torch.stack([b['gt'] for b in batch])
+            gt_coords = torch.stack([b['gt_coord'] for b in batch])
+            gt_cells = torch.stack([b['gt_cell'] for b in batch])
+        
+            out = {
+                'inp': input_images,
+                'gt': gt_images,
+                'gt_coord': gt_coords,
+                'gt_cell': gt_cells
+            }
+            
+        return BatchDict(out)
+            
+    def __getitem__(self, idx):
         # Get image and optionally crop to square
         img = self.tensors[idx]  # CHW format, uint8
         if self.square_crop:
@@ -139,7 +184,8 @@ class UnifiedINFDPreLoadedDataset(Dataset):
         elif random.random() < self.p_max:
             gt_res = min(orig_size, self.resize_gt_ub)
         else:
-            gt_res = random.randint(max(self.resize_gt_lb,orig_size//self.max_downscale), self.resize_gt_ub)
+            gt_res = random.randint(self.resize_gt_lb, 
+                                  min(orig_size, self.resize_gt_ub))
         
         # Resize ground truth
         if not self.full_sampling:
@@ -150,11 +196,39 @@ class UnifiedINFDPreLoadedDataset(Dataset):
             gt = self._preprocess_tensor(img)
         
         # Random crop patch from ground truth
-        if self.full_sampling:
+        if self.full_sampling and not self.square_sampling:
             start_h = pad_info[0]
             start_w = pad_info[2]
             end_h = gt.shape[1] - pad_info[1]
             end_w = gt.shape[2] - pad_info[3]
+            
+            gt = gt[:, start_h:end_h, start_w:end_w]
+                      
+            # Calculate relative coordinates for the patch
+            rel_start_h = start_h / gt_res
+            rel_start_w = start_w / gt_res
+            rel_end_h = end_h / gt_res
+            rel_end_w = end_w / gt_res
+            
+            # bring to -1 to 1 range
+            rel_start_h = 2 * rel_start_h - 1
+            rel_start_w = 2 * rel_start_w - 1
+            rel_end_h = 2 * rel_end_h - 1
+            rel_end_w = 2 * rel_end_w - 1
+            
+            # Generate coordinate and cell grids for the patch
+            coord, cell = make_coord_cell_grid(
+                (end_h - start_h, end_w - start_w),
+                range=[[rel_start_w, rel_end_w], 
+                      [rel_start_h, rel_end_h]]
+            )
+            
+            cell[:] = torch.tensor([2/gt_res, 2/gt_res])
+        elif self.full_sampling and self.square_sampling:
+            start_h = 0
+            start_w = 0
+            end_h = gt.shape[1]
+            end_w = gt.shape[2]
             
             gt = gt[:, start_h:end_h, start_w:end_w]
                       
@@ -220,75 +294,67 @@ class UnifiedINFDPreLoadedDataset(Dataset):
             cell[:] = torch.tensor([2/gt_res, 2/gt_res])
         else:
             coord, cell = make_coord_cell_grid(self.patch_size)
-            
-        return {
+        
+        out = {
             'inp': inp,                    # C×H×W normalized
             'gt': gt,                      # C×P×P normalized
             'gt_coord': coord,             # P×P×2
             'gt_cell': cell,               # P×P×2
         }
         
-    def visualize_item(self, samples=None, idx=None):
-        if samples is None and idx is None:
-            raise ValueError("Either samples or idx must be provided.")
-        if samples is None:
-            samples = self.__getitem__(idx)
-            
-        # number of patches
-        n_patches = samples['gt'].shape[0]
+        return out
 
+    def visualize(self, idx=None):
+        if idx is None:
+            idx = random.randint(0, len(self) - 1)
+        samples = self.__getitem__(idx)
         # Set up the figure
-        fig = plt.figure(figsize=(20, 5 * n_patches))
+        fig = plt.figure(figsize=(20, 10))
 
-        for i in range(n_patches):
+        # 1. Original Input Image
+        ax = plt.subplot(1, 5, 1)
+        img = self.tensors[idx]
+        # Convert from [-1,1] to [0,1] for visualization
+        plt.imshow(img.permute(1, 2, 0).numpy(), cmap='Grays')
+        ax.set_title('Original Input')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.spines['top'].set_visible(True)
+        ax.spines['right'].set_visible(True)
+        ax.spines['bottom'].set_visible(True)
+        ax.spines['left'].set_visible(True)
 
-            # 1. Original Input Image
-            ax = plt.subplot(n_patches, 5, i * 5 + 1)
-            img = self.tensors[samples['idx']]  # CHW format, uint8
-            # Convert from [-1,1] to [0,1] for visualization
-            plt.imshow(img.permute(1, 2, 0).numpy(), cmap='Grays')
-            ax.set_title(f'Original Input ({img.shape[1]}x{img.shape[2]})')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.spines['top'].set_visible(True)
-            ax.spines['right'].set_visible(True)
-            ax.spines['bottom'].set_visible(True)
-            ax.spines['left'].set_visible(True)
+        # 2. Encoder Input
+        ax = plt.subplot(1, 5, 2)
+        inp_viz = (samples['inp'] + 1) / 2
+        plt.imshow(inp_viz.permute(1, 2, 0).numpy(), cmap='Grays')
+        ax.set_title(f'Encoder Input ({self.encoder_res}x{self.encoder_res})')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.spines['top'].set_visible(True)
+        ax.spines['right'].set_visible(True)
+        ax.spines['bottom'].set_visible(True)
+        ax.spines['left'].set_visible(True)
 
-            # 2. Encoder Input
-            ax = plt.subplot(n_patches, 5, i * 5 + 2)
-            inp_viz = (samples['inp'] + 1) / 2
-            plt.imshow(inp_viz.permute(1, 2, 0).numpy(), cmap='Grays')
-            ax.set_title(f'Encoder Input ({self.encoder_res}x{self.encoder_res})')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.spines['top'].set_visible(True)
-            ax.spines['right'].set_visible(True)
-            ax.spines['bottom'].set_visible(True)
-            ax.spines['left'].set_visible(True)
+        # 3. GT Patch
+        ax = plt.subplot(1, 5, 3)
+        patch = samples['gt']
+        plt.imshow(patch.permute(1, 2, 0).numpy(), cmap='Grays')
+        ax.set_title('Random GT Patch')
+        ax.axis('off')
 
+        # 4. Coordinate Grid Visualization
+        ax = plt.subplot(1, 5, 4)
+        coord = (samples['gt_coord'].reshape(-1, 2) + 1 )/2
+        sizes = samples['gt_cell'].reshape(-1, 2)/2
+        patch_vals = samples['gt'].reshape(-1)
+        plt.imshow(inp_viz.permute(1, 2, 0).numpy(), cmap='Grays')
+        # draw square around each cell
+        for i in range(len(coord)):
+            x, y = coord[i] * self.encoder_res - sizes[i][0]* self.encoder_res/2
+            s = sizes[i] * self.encoder_res
+            face_alpha = f"#0000ff{int((patch_vals[i].numpy()+1)/2*255):02x}"
+            rect = plt.Rectangle((x-s[0]/2, y-s[1]/2), s[0], s[1], linewidth=1, edgecolor='r', facecolor=face_alpha)
+            ax.add_patch(rect)
 
-            # 3. GT Patch
-            ax = plt.subplot(n_patches, 5, i * 5 + 3)
-            patch = samples['gt'][i]
-            plt.imshow(patch.permute(1, 2, 0).numpy(), cmap='Grays')
-            ax.set_title('Random GT Patch')
-            ax.axis('off')
-
-            # 4. Coordinate Grid Visualization
-            ax = plt.subplot(n_patches, 5, i * 5 + 4)
-            coord = (samples['gt_coord'][i].reshape(-1, 2) + 1 )/2
-            sizes = samples['gt_cell'][i].reshape(-1, 2)/2
-            patch_vals = samples['gt'][i].reshape(-1)
-            plt.imshow(inp_viz.permute(1, 2, 0).numpy(), cmap='Grays')
-            # plt.scatter(coord[:,0].numpy()*dataset.encoder_res, coord[:,1].numpy()*dataset.encoder_res, c='r', s=1)
-            # draw square around each cell
-            for j in range(len(coord)):
-                x, y = coord[j] * self.encoder_res - sizes[j][0]* self.encoder_res/2
-                s = sizes[j] * self.encoder_res
-                face_alpha = f"#0000ff{int((patch_vals[j].numpy()+1)/2*255):02x}"
-                rect = plt.Rectangle((x-s[0]/2, y-s[1]/2), s[0], s[1], linewidth=1, edgecolor='r', facecolor=face_alpha)
-                ax.add_patch(rect)
-
-            plt.tight_layout()
-            
+        plt.tight_layout()

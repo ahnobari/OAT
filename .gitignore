@@ -25,6 +25,11 @@ Results/*/*.npy
 
 *.mp4
 
-dataset/*/
-dataset/*
-!dataset/run_this.py
+Dataset/*/
+Dataset/*
+!Dataset/run_this.py
+
+*experimental*
+
+Latents/*
+!Latents/README.md

@@ -31,8 +31,6 @@ class Trainer:
         self.device = device
         self.model = model
         
-        
-
         if hasattr(self.model, 'compile') and Compile:
             self.model.compile()
         
@@ -115,26 +113,28 @@ class Trainer:
                 checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
             torch.save(checkpoint, path)
     
-    def load_checkpoint(self, path):
+    def load_checkpoint(self, path, model_only=False):
         checkpoint = torch.load(path, map_location=self.device)
         if isinstance(self.model, (nn.DataParallel, DDP)):
             self.model.module.load_state_dict(checkpoint['model_state_dict'], strict=False)
         else:
             self.model.load_state_dict(checkpoint['model_state_dict'])
-        try:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        except:
-            if self.is_main_process():
-                print("Optimizer state dict not found in checkpoint or incompatible with current optimizer.")
+            
+        if not model_only:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except:
+                if self.is_main_process():
+                    print("Optimizer state dict not found in checkpoint or incompatible with current optimizer.")
 
-        self.current_epoch = checkpoint['current_epoch']
+            self.current_epoch = checkpoint['current_epoch']
 
-        try:
-            if self.scheduler and 'scheduler_state_dict' in checkpoint:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        except:
-            if self.is_main_process():
-                print("Scheduler state dict not found in checkpoint or incompatible with current scheduler.")
+            try:
+                if self.scheduler and 'scheduler_state_dict' in checkpoint:
+                    self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except:
+                if self.is_main_process():
+                    print("Scheduler state dict not found in checkpoint or incompatible with current scheduler.")
             
     def reset_optimizer(self):
         param_list = self.model.parameters()
@@ -186,13 +186,7 @@ class Trainer:
                         
             for i, batch in enumerate(prog):
                 self.optimizer.zero_grad()
-                inputs_batch = batch
-                
-                for key in inputs_batch:
-                    if isinstance(inputs_batch[key], torch.Tensor):
-                        inputs_batch[key] = inputs_batch[key].to(self.device)
-                    elif isinstance(inputs_batch[key], list):
-                        inputs_batch[key] = [x.to(self.device) for x in inputs_batch[key]]
+                inputs_batch = batch.to(self.device)
                 
                 if self.mixed_precision:
                     with torch.amp.autocast("cuda"):
@@ -220,9 +214,6 @@ class Trainer:
                     scaler.update()
                 else:
                     loss.backward()
-                    for p in self.model.parameters():
-                        if p.grad is not None:
-                            p.grad.data.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
                     self.optimizer.step()
                 
                 epoch_loss += loss_dict['loss'].item()
@@ -256,3 +247,50 @@ class Trainer:
 
         if self.DDP:
             dist.barrier()
+            
+    def compute_latents(self, dataset, data_idx, batch_size, verbose=True):
+        self.model.eval()
+        
+        if self.DDP:
+            if self.is_main_process():
+                data_idx = np.array_split(data_idx, self.world_size)
+                sizes = [len(idx) for idx in data_idx]
+                data_idx = data_idx[self.rank]
+            else:
+                data_idx = np.array_split(data_idx, self.world_size)[self.rank]
+        
+        collate_fn = dataset._collate_fn if hasattr(dataset, '_collate_fn') else None
+        loader = torch.utils.data.DataLoader(torch.utils.data.Subset(dataset, data_idx), batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False, collate_fn=collate_fn)
+        
+        all_latents = []
+        
+        if verbose and self.is_main_process():
+            prog = tqdm(loader, total=len(loader))
+        else:
+            prog = loader
+        
+        for i, batch in enumerate(prog):
+            if self.multi_gpu and self.DDP or not self.multi_gpu:
+                inputs_batch = batch.to(self.device)
+            else:
+                inputs_batch = batch
+            with torch.no_grad():
+                if self.DDP:
+                    with self.model.no_sync():
+                        if self.mixed_precision:
+                            with torch.amp.autocast("cuda"):
+                                latents = self.model(inputs_batch, latent_only=True)['latent']
+                        else:
+                            latents = self.model(inputs_batch, latent_only=True)['latent']
+                else:
+                    if self.mixed_precision:
+                        with torch.amp.autocast("cuda"):
+                            latents = self.model(inputs_batch, latent_only=True)['latent']
+                    else:
+                        latents = self.model(inputs_batch, latent_only=True)['latent']
+                
+                all_latents.append(latents.detach().cpu())
+                
+        all_latents = torch.cat(all_latents, dim=0)
+        self.model.train()
+        return all_latents
