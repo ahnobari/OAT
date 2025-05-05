@@ -9,6 +9,48 @@ import matplotlib.pyplot as plt
 from tqdm.auto import trange
 from ._utils import *
 
+def load_all(data_path, split):
+    if split == 'test':
+        domtopodiff_tops = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'topologies.npy'), allow_pickle=True)
+        domtopodiff_shapes = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'shapes.npy'))
+        domtopodiff_bcs = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'bcs.npy'), allow_pickle=True)
+        domtopodiff_vfs = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'vfs.npy'), allow_pickle=True)
+        domtopodiff_loads = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'loads.npy'), allow_pickle=True)
+        
+        labeled_tops = np.load(os.path.join(data_path,'test_data', 'topologies.npy'), allow_pickle=True)
+        labeled_shapes = np.load(os.path.join(data_path,'test_data', 'shapes.npy'))
+        labeled_bcs = np.load(os.path.join(data_path,'test_data', 'bcs.npy'), allow_pickle=True)
+        labeled_vfs = np.load(os.path.join(data_path,'test_data', 'vfs.npy'), allow_pickle=True)
+        labeled_loads = np.load(os.path.join(data_path,'test_data', 'loads.npy'), allow_pickle=True)
+        
+        tops = np.concatenate([labeled_tops, domtopodiff_tops], axis=0)
+        shapes = np.concatenate([labeled_shapes, domtopodiff_shapes], axis=0)
+        bcs = np.concatenate([labeled_bcs, domtopodiff_bcs], axis=0)
+        vfs = np.concatenate([labeled_vfs, domtopodiff_vfs], axis=0)
+        loads = np.concatenate([labeled_loads, domtopodiff_loads], axis=0)
+        
+    else:
+        domtopodiff_tops = np.load(os.path.join(data_path,'DOMTopoDiff', 'topologies.npy'), allow_pickle=True)
+        domtopodiff_shapes = np.load(os.path.join(data_path,'DOMTopoDiff', 'shapes.npy'))
+        domtopodiff_bcs = np.load(os.path.join(data_path,'DOMTopoDiff', 'bcs.npy'), allow_pickle=True)
+        domtopodiff_vfs = np.load(os.path.join(data_path,'DOMTopoDiff', 'vfs.npy'), allow_pickle=True)
+        domtopodiff_loads = np.load(os.path.join(data_path,'DOMTopoDiff', 'loads.npy'), allow_pickle=True)
+        
+        labeled_tops = np.load(os.path.join(data_path,'labeled_data', 'topologies.npy'), allow_pickle=True)
+        labeled_shapes = np.load(os.path.join(data_path,'labeled_data', 'shapes.npy'))
+        labeled_bcs = np.load(os.path.join(data_path,'labeled_data', 'bcs.npy'), allow_pickle=True)
+        labeled_vfs = np.load(os.path.join(data_path,'labeled_data', 'vfs.npy'), allow_pickle=True)
+        labeled_loads = np.load(os.path.join(data_path,'labeled_data', 'loads.npy'), allow_pickle=True)
+        
+        tops = np.concatenate([labeled_tops, domtopodiff_tops], axis=0)
+        shapes = np.concatenate([labeled_shapes, domtopodiff_shapes], axis=0)
+        bcs = np.concatenate([labeled_bcs, domtopodiff_bcs], axis=0)
+        vfs = np.concatenate([labeled_vfs, domtopodiff_vfs], axis=0)
+        loads = np.concatenate([labeled_loads, domtopodiff_loads], axis=0)
+    
+    return tops, shapes, bcs, vfs, loads
+        
+
 def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='pre_training', **kawrgs):
     if split == 'test':
         if subset == 'DOMTopoDiff':
@@ -22,11 +64,14 @@ def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='pre
         
     print(f"Loading data from {data_path}")
     
-    tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
-    shapes = np.load(os.path.join(data_path,'shapes.npy'))
-    bcs = np.load(os.path.join(data_path,'bcs.npy'), allow_pickle=True)
-    vfs = np.load(os.path.join(data_path,'vfs.npy'), allow_pickle=True)
-    loads = np.load(os.path.join(data_path,'loads.npy'), allow_pickle=True)
+    if subset == 'all':
+        tops, shapes, bcs, vfs, loads = load_all(data_path, split)
+    else:
+        tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
+        shapes = np.load(os.path.join(data_path,'shapes.npy'))
+        bcs = np.load(os.path.join(data_path,'bcs.npy'), allow_pickle=True)
+        vfs = np.load(os.path.join(data_path,'vfs.npy'), allow_pickle=True)
+        loads = np.load(os.path.join(data_path,'loads.npy'), allow_pickle=True)
     
     tensors = []
     
@@ -59,6 +104,8 @@ class DiffDataset(Dataset):
                  unconditional_prob=0.0,
                  BC_dropout_prob=0.0,
                  C_dropout_prob=0.0,
+                 shift = None,
+                 scale = None
                  ):
         
         self.tensors = tensors  # List of CHW tensors, uint8 [0, 255]
@@ -74,13 +121,20 @@ class DiffDataset(Dataset):
         
         self.max_size = 0
         
-        scale = latent_tensors.max() - latent_tensors.min()
-        min_val = latent_tensors.min()
+        if scale is None:
+            scale = latent_tensors.max() - latent_tensors.min()
+        if shift is None:
+            min_val = latent_tensors.min()
+        else:
+            min_val = -shift
         
         # Set up transforms
         self.normalize = transforms.Normalize(0.5, 0.5)
         self.latent_normalize = lambda x: x.add_(-min_val).div_(scale).mul_(2).add_(-1)
         self.resize = transforms.Resize
+        
+        self.shift = -min_val
+        self.scale = scale
 
         self.inverse_normalize = lambda x: (x + 1)/2 * scale + min_val
         
@@ -231,12 +285,12 @@ class DiffDataset(Dataset):
         
         out = {
             'gt': gt.unsqueeze(0).expand(batch_size, -1, -1, -1),                      # BxC×P×P
-            'gt_coord': coord.unsqueeze(0).expand(batch_size, -1, -1),             # B×P×P×2
-            'gt_cell': cell.unsqueeze(0).expand(batch_size, -1, -1),               # B×P×P×2
-            'gt_full': gt_full.unsqueeze(0).expand(batch_size, -1, -1),            # BxC×H×W
-            'gt_full_coord': full_coord.unsqueeze(0).expand(batch_size, -1, -1),   # B×H×W×2
-            'gt_full_cell': full_cell.unsqueeze(0).expand(batch_size, -1, -1),     # B×H×W×2
-            'full_zero_mask': zero_mask.unsqueeze(0).expand(batch_size, -1, -1),   # B×C×H×W
+            'gt_coord': coord.unsqueeze(0).expand(batch_size, -1, -1, -1),             # B×P×P×2
+            'gt_cell': cell.unsqueeze(0).expand(batch_size, -1, -1, -1),               # B×P×P×2
+            'gt_full': gt_full.unsqueeze(0).expand(batch_size, -1, -1, -1),            # BxC×H×W
+            'gt_full_coord': full_coord.unsqueeze(0).expand(batch_size, -1, -1, -1),   # B×H×W×2
+            'gt_full_cell': full_cell.unsqueeze(0).expand(batch_size, -1, -1, -1),     # B×H×W×2
+            'full_zero_mask': zero_mask.unsqueeze(0).expand(batch_size, -1, -1, -1),   # B×C×H×W
         }
         
         return BatchDict(out)

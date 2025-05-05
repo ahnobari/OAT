@@ -74,7 +74,9 @@ model = CTOPUNet(
     C_n_layers = [4,4],
     C_hidden_size = [256,256],
     C_mapping_size = [128,128],
-    latent_size = 1280
+    latent_size = 1280,
+    latent_shift=dataset.shift,
+    latent_scale=dataset.scale
 )
 
 diffusion = DDIMPipeline()

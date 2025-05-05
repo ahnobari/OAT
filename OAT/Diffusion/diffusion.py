@@ -1,7 +1,8 @@
 from diffusers import DDIMScheduler, DDPMScheduler
 import torch
-from typing import Optional
+from typing import Optional, Callable
 from .UNet import CTOPUNet
+from tqdm.auto import tqdm, trange
 
 class DDIMPipeline:
     def __init__(self, num_training_steps = 1000, prediction_type = 'v_prediction', rescale_betas_zero_snr=True, timestep_spacing='trailing', cosine_schedule=True, loss_type='l2'):
@@ -59,3 +60,64 @@ class DDIMPipeline:
         loss = self.loss_fn(pred, target)
         
         return {'loss': loss }
+    
+    @torch.no_grad()
+    def inference(self, 
+                  model: CTOPUNet,
+                  num_sampling_steps: int = 50,
+                  noise: Optional[torch.Tensor] = None,
+                  batch_size: Optional[int] = 1,
+                  guidance_function: Optional[Callable] = None,
+                  guidance_scale: float = 1.0,
+                  static_guidance: bool = False,
+                  direct_guidance: bool = False,
+                  final_callable: Optional[Callable] = None,
+                  **kwargs):
+        
+        """
+        Perform inference using the DDIM scheduler.
+        """
+        if noise is None:
+            noise = torch.randn((batch_size, model.conv_in.in_channels, model.sample_size, model.sample_size), device=model.device)
+        
+        batch_size = noise.shape[0]
+        
+        # Prepare the scheduler
+        self.InferenceScheduler.set_timesteps(num_sampling_steps)
+        
+        for t in tqdm(self.InferenceScheduler.timesteps):
+            pred_noise = model(noise, t, **kwargs).sample
+                
+            denoised = self.InferenceScheduler.step(pred_noise, t, noise)
+            pred = (denoised.pred_original_sample + 1) / 2 * model.latent_scale - model.latent_shift
+            
+            if guidance_function is not None:
+                grads = guidance_function(pred)
+            
+                alpha_bar = self.InferenceScheduler.alphas_cumprod[t]        # scalar tensor
+                beta_bar  = 1.0 - alpha_bar
+                
+                if static_guidance:
+                    mult = guidance_scale
+                else:
+                    mult = guidance_scale * (beta_bar / alpha_bar).sqrt()
+                
+                if direct_guidance:
+                    noise = denoised.prev_sample
+                    noise = noise - mult * grads
+                    
+                else:
+                    grad_eps  = -grads * (beta_bar / alpha_bar).sqrt()   # dε = −√β/α ∇x0
+                    noise_pred = pred_noise + guidance_scale * grad_eps
+                    noise = self.InferenceScheduler.step(noise_pred, t, noise).prev_sample
+            else:
+                noise = denoised.prev_sample
+        
+        noise = (noise + 1) / 2 * model.latent_scale - model.latent_shift
+        
+        if final_callable is not None:
+            noise = final_callable(noise)
+        
+        noise = noise.detach().cpu().numpy()
+        
+        return noise

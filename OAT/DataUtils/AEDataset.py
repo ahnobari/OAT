@@ -9,6 +9,36 @@ import matplotlib.pyplot as plt
 from tqdm.auto import trange
 from ._utils import *
 
+def load_all(data_path):
+    pre_train_path = os.path.join(data_path,'pre_training')
+    domtopodiff_path = os.path.join(data_path,'DOMTopoDiff')
+    
+    pre_train_tops = np.load(os.path.join(pre_train_path,'topologies.npy'), allow_pickle=True)
+    pre_train_shapes = np.load(os.path.join(pre_train_path,'shapes.npy'))
+    
+    domtopodiff_tops = np.load(os.path.join(domtopodiff_path,'topologies.npy'), allow_pickle=True)
+    domtopodiff_shapes = np.load(os.path.join(domtopodiff_path,'shapes.npy'))
+    
+    tops = np.concatenate((pre_train_tops, domtopodiff_tops), axis=0)
+    shapes = np.concatenate((pre_train_shapes, domtopodiff_shapes), axis=0)
+    
+    return tops, shapes
+
+def load_all_labeled(data_path):
+    labeled_path = os.path.join(data_path,'labeled_data')
+    domtopodiff_path = os.path.join(data_path,'DOMTopoDiff')
+    
+    labeled_tops = np.load(os.path.join(labeled_path,'topologies.npy'), allow_pickle=True)
+    labeled_shapes = np.load(os.path.join(labeled_path,'shapes.npy'))
+    
+    domtopodiff_tops = np.load(os.path.join(domtopodiff_path,'topologies.npy'), allow_pickle=True)
+    domtopodiff_shapes = np.load(os.path.join(domtopodiff_path,'shapes.npy'))
+    
+    tops = np.concatenate((labeled_tops, domtopodiff_tops), axis=0)
+    shapes = np.concatenate((labeled_shapes, domtopodiff_shapes), axis=0)
+    
+    return tops, shapes
+
 def load_OAT_AE(data_path='Dataset', split='train', subset='pre_training', **kawrgs):
     if split == 'test':
         if subset == 'DOMTopoDiff':
@@ -24,8 +54,13 @@ def load_OAT_AE(data_path='Dataset', split='train', subset='pre_training', **kaw
         
     print(f"Loading data from {data_path}")
     
-    tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
-    shapes = np.load(os.path.join(data_path,'shapes.npy'))
+    if subset == 'all':
+        tops, shapes = load_all(data_path)
+    elif subset == 'all_labeled':
+        tops, shapes = load_all_labeled(data_path)
+    else:
+        tops = np.load(os.path.join(data_path,'topologies.npy'), allow_pickle=True)
+        shapes = np.load(os.path.join(data_path,'shapes.npy'))
     
     tensors = []
     

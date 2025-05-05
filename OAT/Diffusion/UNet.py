@@ -15,7 +15,10 @@ class CTOPUNet(UNet2DModel):
                  C_n_layers = [4,4],
                  C_hidden_size = [256,256],
                  C_mapping_size = [128,128],
-                 latent_size = 256, **kwargs):
+                 latent_size = 256,
+                 latent_shift = 0,
+                 latent_scale = 1,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         
         self.problem_encoder = ProblemEncoder(
@@ -32,6 +35,10 @@ class CTOPUNet(UNet2DModel):
         
         time_embed_dim = self.time_embedding.linear_1.out_features
         self.problem_embedding = TimestepEmbedding(latent_size, time_embed_dim)
+        
+        self.latent_size = latent_size
+        self.latent_shift = torch.nn.Parameter(torch.tensor([latent_shift]), requires_grad=False)
+        self.latent_scale = torch.nn.Parameter(torch.tensor([latent_scale]), requires_grad=False)
         
     def forward(
         self,
