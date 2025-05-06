@@ -3,8 +3,9 @@ from diffusers.models.unets.unet_2d import UNet2DOutput, TimestepEmbedding
 from ._models import ProblemEncoder
 import torch
 from typing import Optional, Tuple, Union
+from huggingface_hub import PyTorchModelHubMixin
 
-class CTOPUNet(UNet2DModel):
+class CTOPUNet(UNet2DModel, PyTorchModelHubMixin):
     def __init__(self,
                  *args,
                  BCs = [4,4],

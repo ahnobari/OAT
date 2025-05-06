@@ -1,24 +1,10 @@
 from ._models import *
-import torch.distributed as dist
 import torch
-
 from torch import nn
-from torch.nn import functional as F
-import numpy as np
-
-import torch.utils
-from tqdm.auto import tqdm, trange
-
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
-from torch.profiler import profile, record_function, ProfilerActivity
-import bitsandbytes as bnb
-import torch_optimizer as topt
-from diffusers.optimization import get_cosine_schedule_with_warmup
-from diffusers import DDPMScheduler
+from huggingface_hub import PyTorchModelHubMixin
 import os
 
-class NFAE(nn.Module):
+class NFAE(nn.Module, PyTorchModelHubMixin):
     def __init__(self, in_channels=1, resolution=96, z_channels=1, dec_out_channels=128, recon_loss='l1', out_act='tanh'):
         super(NFAE, self).__init__()
         self.in_channels = in_channels
