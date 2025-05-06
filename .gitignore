@@ -14,8 +14,8 @@ Data/*/*/*
 
 Checkpoints/*.pth
 Checkpoints/*/*.pth
-CheckpointsDiff/*.pth
-CheckpointsDiff/*/*.pth
+CheckpointsDiff*/*.pth
+CheckpointsDiff*/*/*.pth
 *.out
 *.html
 log/*

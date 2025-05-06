@@ -72,6 +72,7 @@ class DDIMPipeline:
                   static_guidance: bool = False,
                   direct_guidance: bool = False,
                   final_callable: Optional[Callable] = None,
+                  history: bool = False,
                   **kwargs):
         
         """
@@ -85,14 +86,19 @@ class DDIMPipeline:
         # Prepare the scheduler
         self.InferenceScheduler.set_timesteps(num_sampling_steps)
         
+        if history:
+            hist = []
+        else: 
+            hist = None
+        
         for t in tqdm(self.InferenceScheduler.timesteps):
             pred_noise = model(noise, t, **kwargs).sample
                 
             denoised = self.InferenceScheduler.step(pred_noise, t, noise)
-            pred = (denoised.pred_original_sample + 1) / 2 * model.latent_scale - model.latent_shift
+            pred = denoised.pred_original_sample
             
             if guidance_function is not None:
-                grads = guidance_function(pred)
+                grads = guidance_function(denoised, t, history = hist, model = model, final_callable = final_callable, **kwargs)
             
                 alpha_bar = self.InferenceScheduler.alphas_cumprod[t]        # scalar tensor
                 beta_bar  = 1.0 - alpha_bar
@@ -112,6 +118,12 @@ class DDIMPipeline:
                     noise = self.InferenceScheduler.step(noise_pred, t, noise).prev_sample
             else:
                 noise = denoised.prev_sample
+                
+            if history:
+                hist.append({'x_0': (pred + 1) / 2 * model.latent_scale - model.latent_shift,
+                             'x_t': (noise + 1) / 2 * model.latent_scale - model.latent_shift,
+                             'X_0': final_callable((pred + 1) / 2 * model.latent_scale - model.latent_shift),
+                             'X_t': final_callable((noise + 1) / 2 * model.latent_scale - model.latent_shift)})
         
         noise = (noise + 1) / 2 * model.latent_scale - model.latent_shift
         
@@ -120,4 +132,7 @@ class DDIMPipeline:
         
         noise = noise.detach().cpu().numpy()
         
+        if history:
+            return noise, hist
+    
         return noise

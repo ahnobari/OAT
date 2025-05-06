@@ -15,7 +15,7 @@ def load_all(data_path, split):
         domtopodiff_shapes = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'shapes.npy'))
         domtopodiff_bcs = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'bcs.npy'), allow_pickle=True)
         domtopodiff_vfs = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'vfs.npy'), allow_pickle=True)
-        domtopodiff_loads = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'loads.npy'), allow_pickle=True)
+        domtopodiff_loads = np.load(os.path.join(data_path,'DOMTopoDiff', 'Test', 'loads.npy'), allow_pickle=True).astype(np.object_)
         
         labeled_tops = np.load(os.path.join(data_path,'test_data', 'topologies.npy'), allow_pickle=True)
         labeled_shapes = np.load(os.path.join(data_path,'test_data', 'shapes.npy'))
@@ -27,7 +27,8 @@ def load_all(data_path, split):
         shapes = np.concatenate([labeled_shapes, domtopodiff_shapes], axis=0)
         bcs = np.concatenate([labeled_bcs, domtopodiff_bcs], axis=0)
         vfs = np.concatenate([labeled_vfs, domtopodiff_vfs], axis=0)
-        loads = np.concatenate([labeled_loads, domtopodiff_loads], axis=0)
+        loads = np.array([labeled_loads[i] for i in range(len(labeled_loads))] +
+                         [domtopodiff_loads[i] for i in range(len(domtopodiff_loads))], dtype=object)
         
     else:
         domtopodiff_tops = np.load(os.path.join(data_path,'DOMTopoDiff', 'topologies.npy'), allow_pickle=True)
@@ -46,12 +47,13 @@ def load_all(data_path, split):
         shapes = np.concatenate([labeled_shapes, domtopodiff_shapes], axis=0)
         bcs = np.concatenate([labeled_bcs, domtopodiff_bcs], axis=0)
         vfs = np.concatenate([labeled_vfs, domtopodiff_vfs], axis=0)
-        loads = np.concatenate([labeled_loads, domtopodiff_loads], axis=0)
+        loads = np.array([labeled_loads[i] for i in range(len(labeled_loads))] +
+                         [domtopodiff_loads[i] for i in range(len(domtopodiff_loads))], dtype=object)
     
     return tops, shapes, bcs, vfs, loads
         
 
-def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='pre_training', **kawrgs):
+def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='labeled', ignore_BC=False, ignore_vf=False, cell_size=True, **kawrgs):
     if split == 'test':
         if subset == 'DOMTopoDiff':
             data_path = os.path.join(data_path,'DOMTopoDiff', 'Test')
@@ -81,11 +83,16 @@ def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='pre
     # dataset = AEDataset(tensors=tensors, **kawrgs)
     latents = torch.load(latents_path)
     
+    if cell_size:
+        Cs = [vfs, shapes/shapes.max(1)[:, None], 1/shapes.max(1)[:, None]] if not ignore_vf else [shapes/shapes.max(1)[:, None], 1/shapes.max(1)[:, None]]
+    else:
+        Cs = [vfs, shapes/shapes.max(1)[:, None]] if not ignore_vf else [shapes/shapes.max(1)[:, None]]
+    
     dataset = DiffDataset(
         tensors=tensors,
         latent_tensors=latents,
-        BCs=[bcs,loads],
-        Cs=[vfs, shapes/shapes.max(1)[:,None]],
+        BCs=[bcs,loads] if not ignore_BC else [],
+        Cs=Cs,
         **kawrgs
     )
     
@@ -178,9 +185,13 @@ class DiffDataset(Dataset):
             if Cs[i].dim() == 1:
                 Cs[i] = Cs[i].unsqueeze(1)
         
-        BCs = [torch.cat([torch.tensor(b['BCs'][i].astype(np.float32)) for b in batch]) for i in range(len(batch[0]['BCs']))]
-        BC_batch = [torch.cat([torch.tensor(np.repeat(j,b['sizes'][i])).long() for j,b in enumerate(batch)]) for i in range(len(batch[0]['BCs']))]
-        
+        if self.n_BC > 0:
+            BCs = [torch.cat([torch.tensor(b['BCs'][i].astype(np.float32)) for b in batch]) for i in range(len(batch[0]['BCs']))]
+            BC_batch = [torch.cat([torch.tensor(np.repeat(j,b['sizes'][i])).long() for j,b in enumerate(batch)]) for i in range(len(batch[0]['BCs']))]
+        else:
+            BCs = None
+            BC_batch = None
+            
         out =  {
             'sample': self.latent_normalize(input_images),
             'Cs': Cs,

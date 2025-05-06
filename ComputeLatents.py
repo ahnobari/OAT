@@ -16,7 +16,7 @@ args.add_argument("--dataset", type=str, default="labeled", help="dataset name. 
 args.add_argument("--dataset_path", type=str, default="Dataset", help="path to dataset. default Dataset")
 args.add_argument("--dataset_split", type=str, default="train", help="dataset split. Options: train, test. default train")
 args.add_argument("--encoder_res", type=int, default=256, help="encoder resolution. default 256")
-args.add_argument("--batch_size", type=int, default=200, help="batch size. default 256")
+args.add_argument("--batch_size", type=int, default=200, help="batch size. default 200")
 args.add_argument("--multi_gpu", action="store_true", help="use multiple GPUs")
 args.add_argument("--DDP", action="store_true", help="use DDP")
 args.add_argument("--compile", action="store_true", help="compile the model")

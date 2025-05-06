@@ -33,6 +33,8 @@ args.add_argument('--optimizer', type=str, default='AdamW', help='Optimizer to u
 args.add_argument('--unconditional_prob', type=float, default=0.5, help='Unconditional probability. Default: 0.5')
 args.add_argument('--BC_dropout_prob', type=float, default=0.25, help='BC dropout probability. Default: 0.25')
 args.add_argument('--C_dropout_prob', type=float, default=0.25, help='C dropout probability. Default: 0.25')
+args.add_argument('--ignore_BCs', action='store_true', help='Ignore BCs. Default: False')
+args.add_argument('--ignore_vfs', action='store_true', help='Ignore vfs. Default: False')
 args = args.parse_args()
 
 if args.latents_path is None:
@@ -43,7 +45,9 @@ dataset = load_OAT_CDiff(latents_path=args.latents_path,
                          subset=args.dataset,
                          unconditional_prob=args.unconditional_prob, 
                          BC_dropout_prob=args.BC_dropout_prob, 
-                         C_dropout_prob=args.C_dropout_prob)
+                         C_dropout_prob=args.C_dropout_prob,
+                         ignore_BC=args.ignore_BCs,
+                         ignore_vf=args.ignore_vfs)
 
 model = CTOPUNet(
     sample_size       = dataset.latent_tensors.shape[2],          # latent spatial size
@@ -66,14 +70,14 @@ model = CTOPUNet(
     norm_num_groups   = 32,
     mid_block_type    = "UNetMidBlock2DAttn",     # self‑attention in the bottleneck
     attention_head_dim= 8,                        # identical to SD‑v1
-    BCs = [4,4],
-    BC_n_layers = [4,4],
-    BC_hidden_size = [256,256], 
-    BC_emb_size = [128,128], 
-    Cs = [1,2],
-    C_n_layers = [4,4],
-    C_hidden_size = [256,256],
-    C_mapping_size = [128,128],
+    BCs = [4,4] if not args.ignore_BCs else [],
+    BC_n_layers = [4,4] if not args.ignore_BCs else [],
+    BC_hidden_size = [256,256] if not args.ignore_BCs else [], 
+    BC_emb_size = [128,128] if not args.ignore_BCs else [], 
+    Cs = [1,2,1] if not args.ignore_vfs else [2,1],
+    C_n_layers = [4,4,4] if not args.ignore_vfs else [4,4],
+    C_hidden_size = [256,256,256] if not args.ignore_vfs else [256,256],
+    C_mapping_size = [128,128,128] if not args.ignore_vfs else [128,128],
     latent_size = 1280,
     latent_shift=dataset.shift,
     latent_scale=dataset.scale
