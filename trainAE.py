@@ -82,7 +82,7 @@ if args.resume:
                 print("No checkpoint found in the directory")
                 
 trainer.train(dataset, 
-              data_idx=np.arange(47000,107000), 
+              data_idx=np.arange(len(dataset)), 
               batch_size=args.batch_size,
               epochs=args.num_epochs,
               checkpoint_dir=args.checkpoint_dir,
