@@ -23,6 +23,7 @@ args.add_argument("--compile", action="store_true", help="compile the model")
 args.add_argument("--mixed_precision", action="store_true", help="use mixed precision")
 args.add_argument("--checkpoint", type=str, default="Checkpoints/last", help="path to resume checkpoint. default Checkpoints/last will find the latest checkpoint in Checkpoints")
 args.add_argument("--save_path", type=str, default="Latents", help="path to save latents. default Latents.")
+args.add_argument("--hf_checkpoint", action="store_true", help="huggingface checkpoint is passed.")
 args = args.parse_args()
 
 
@@ -39,7 +40,11 @@ trainer = Trainer(model,
                   DDP_train=args.DDP,
                   Compile=args.compile,
                   mixed_precision=args.mixed_precision)
-if os.path.exists(args.checkpoint):
+
+if args.hf_checkpoint:
+    model.from_pretrained(args.checkpoint)
+    
+elif os.path.exists(args.checkpoint):
     model.load_from_trainer_checkpoint(args.checkpoint, strict=False)
     latest_checkpoint = args.checkpoint.split("/")[-1]
     
