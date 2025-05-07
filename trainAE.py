@@ -47,6 +47,9 @@ dataset = load_OAT_AE(data_path=args.dataset_path,
 
 model = NFAE(resolution=args.encoder_res)
 
+if args.hf_checkpoint and args.resume:
+    model = NFAE.from_pretrained(args.resume_path)
+
 max_scheduler_steps = (args.num_epochs * len(dataset) + args.batch_size - 1) // args.batch_size
 
 if args.multi_gpu:
@@ -67,7 +70,7 @@ trainer = Trainer(model,
 
 if args.resume:
     if args.hf_checkpoint:
-        model.from_pretrained(args.resume_path)
+        pass
     elif os.path.exists(args.resume_path):
         trainer.load_checkpoint(args.resume_path, model_only=args.resume_model_only)
     elif "/last" in args.resume_path:

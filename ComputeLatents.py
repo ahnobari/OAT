@@ -35,14 +35,8 @@ dataset = load_OAT_AE(data_path=args.dataset_path,
 
 model = NFAE(resolution=args.encoder_res)
 
-trainer = Trainer(model, 
-                  multi_gpu=args.multi_gpu,
-                  DDP_train=args.DDP,
-                  Compile=args.compile,
-                  mixed_precision=args.mixed_precision)
-
 if args.hf_checkpoint:
-    model.from_pretrained(args.checkpoint)
+    model = NFAE.from_pretrained(args.checkpoint)
     latest_checkpoint = args.checkpoint.replace("/", "__") + '__hf.pth'
     
 elif os.path.exists(args.checkpoint):
@@ -62,6 +56,12 @@ elif "/last" in args.checkpoint:
             print(f"Loading from checkpoint: {latest_checkpoint}")
         else:
             print("No checkpoint found in the directory")
+
+trainer = Trainer(model, 
+                  multi_gpu=args.multi_gpu,
+                  DDP_train=args.DDP,
+                  Compile=args.compile,
+                  mixed_precision=args.mixed_precision)
 
 # Create the save directory if it doesn't exist
 if not os.path.exists(args.save_path):

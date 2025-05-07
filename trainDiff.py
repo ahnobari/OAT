@@ -84,6 +84,9 @@ model = CTOPUNet(
     latentScale=dataset.scale
 )
 
+if args.hf_checkpoint and args.resume:
+    model = CTOPUNet.from_pretrained(args.resume_path)
+
 diffusion = DDIMPipeline()
 
 
@@ -108,7 +111,7 @@ trainer = Trainer(model,
 
 if args.resume:
     if args.hf_checkpoint:
-        model.from_pretrained(args.resume_path)
+        pass
     elif os.path.exists(args.resume_path):
         trainer.load_checkpoint(args.resume_path, model_only=args.resume_model_only)
     elif "/last" in args.resume_path:
