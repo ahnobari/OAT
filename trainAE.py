@@ -32,6 +32,7 @@ args.add_argument("--resume_model_only", action="store_true", help="resume train
 args.add_argument('--optimizer', type=str, default='AdamW', help='Optimizer to use. Default: AdamW, Options: Adam, AdamW, SGD, Adam8, Adafactor')
 args.add_argument('--max_sampling_prob', type=float, default=1.0, help='Maximum sampling probability (sample true resolution patch). Default: 1.0')
 args.add_argument('--full_sampling', action='store_true', help='Use full sampling (sample entire image). Default: False. If True patch size will be image size')
+args.add_argument("--hf_checkpoint", action="store_true", help="huggingface checkpoint is passed.")
 args = args.parse_args()
 
 
@@ -65,7 +66,9 @@ trainer = Trainer(model,
 
 
 if args.resume:
-    if os.path.exists(args.resume_path):
+    if args.hf_checkpoint:
+        model.from_pretrained(args.resume_path)
+    elif os.path.exists(args.resume_path):
         trainer.load_checkpoint(args.resume_path, model_only=args.resume_model_only)
     elif "/last" in args.resume_path:
         # find the latest checkpoint in the resume directory

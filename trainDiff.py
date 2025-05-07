@@ -35,6 +35,7 @@ args.add_argument('--BC_dropout_prob', type=float, default=0.25, help='BC dropou
 args.add_argument('--C_dropout_prob', type=float, default=0.25, help='C dropout probability. Default: 0.25')
 args.add_argument('--ignore_BCs', action='store_true', help='Ignore BCs. Default: False')
 args.add_argument('--ignore_vfs', action='store_true', help='Ignore vfs. Default: False')
+args.add_argument("--hf_checkpoint", action="store_true", help="huggingface checkpoint is passed.")
 args = args.parse_args()
 
 if args.latents_path is None:
@@ -106,7 +107,9 @@ trainer = Trainer(model,
                   custom_loss=diffusion.compute_loss)
 
 if args.resume:
-    if os.path.exists(args.resume_path):
+    if args.hf_checkpoint:
+        model.from_pretrained(args.resume_path)
+    elif os.path.exists(args.resume_path):
         trainer.load_checkpoint(args.resume_path, model_only=args.resume_model_only)
     elif "/last" in args.resume_path:
         # find the latest checkpoint in the resume directory
