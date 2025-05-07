@@ -43,6 +43,7 @@ trainer = Trainer(model,
 
 if args.hf_checkpoint:
     model.from_pretrained(args.checkpoint)
+    latest_checkpoint = args.checkpoint.replace("/", "__")
     
 elif os.path.exists(args.checkpoint):
     model.load_from_trainer_checkpoint(args.checkpoint, strict=False)
