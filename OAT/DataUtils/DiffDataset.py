@@ -81,7 +81,10 @@ def load_OAT_CDiff(latents_path, data_path='Dataset', split='train', subset='lab
         tensors.append(torch.tensor(tops[i].reshape(shapes[i])[None]*255, dtype=torch.uint8))
     
     # dataset = AEDataset(tensors=tensors, **kawrgs)
-    latents = torch.load(latents_path)
+    if latents_path is not None:
+        latents = torch.load(latents_path)
+    else:
+        latents = None
     
     if cell_size:
         Cs = [vfs, shapes/shapes.max(1)[:, None], 1/shapes.max(1)[:, None]] if not ignore_vf else [shapes/shapes.max(1)[:, None], 1/shapes.max(1)[:, None]]
@@ -128,12 +131,20 @@ class DiffDataset(Dataset):
         
         self.max_size = 0
         
-        if scale is None:
-            scale = latent_tensors.max() - latent_tensors.min()
-        if shift is None:
-            min_val = latent_tensors.min()
+        if latent_tensors is not None:
+            if scale is None:
+                scale = latent_tensors.max() - latent_tensors.min()
+            if shift is None:
+                min_val = latent_tensors.min()
+            else:
+                min_val = -shift
         else:
-            min_val = -shift
+            if scale is None:
+                scale = 1.0
+            if shift is None:
+                min_val = 0.0
+            else:
+                min_val = -shift
         
         # Set up transforms
         self.normalize = transforms.Normalize(0.5, 0.5)
@@ -179,7 +190,8 @@ class DiffDataset(Dataset):
         return img
     
     def _collate_fn(self, batch):
-        input_images = torch.stack([b['input_img'] for b in batch])
+        if self.latent_tensors is not None:  
+            input_images = torch.stack([b['input_img'] for b in batch])
         Cs = [torch.stack([torch.tensor(b['Cs'][i].astype(np.float32)) for b in batch]) for i in range(len(batch[0]['Cs']))]
         for i in range(len(Cs)):
             if Cs[i].dim() == 1:
@@ -192,19 +204,29 @@ class DiffDataset(Dataset):
             BCs = None
             BC_batch = None
             
-        out =  {
-            'sample': self.latent_normalize(input_images),
-            'Cs': Cs,
-            'BCs': BCs,
-            'BC_Batch': BC_batch,
-            'unconditioned': np.random.rand() < self.unconditional_prob
-        }
+        if self.latent_tensors is not None:
+            out =  {
+                'sample': self.latent_normalize(input_images),
+                'Cs': Cs,
+                'BCs': BCs,
+                'BC_Batch': BC_batch,
+                'unconditioned': np.random.rand() < self.unconditional_prob
+            }
+        else:
+            out = {
+                'Cs': Cs,
+                'BCs': BCs,
+                'BC_Batch': BC_batch,
+                'unconditioned': np.random.rand() < self.unconditional_prob
+            }
         
         return BatchDict(out)
     
     def __getitem__(self, idx):
-        
-        input_img = self.latent_tensors[idx]
+        if self.latent_tensors is None:
+            input_img = None
+        else:
+            input_img = self.latent_tensors[idx]
         Cs = []
         for i in range(self.n_C):
             Cs.append(np.array(self.Cs[i][idx]))

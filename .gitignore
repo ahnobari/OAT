@@ -35,3 +35,6 @@ Dataset/*
 
 Latents/*
 !Latents/README.md
+
+Results/*
+*.pkl

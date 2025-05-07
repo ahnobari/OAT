@@ -73,6 +73,8 @@ class DDIMPipeline:
                   direct_guidance: bool = False,
                   final_callable: Optional[Callable] = None,
                   history: bool = False,
+                  verbose: bool = False,
+                  conditioning_over_relaxation_factor: Optional[float] = None,
                   **kwargs):
         
         """
@@ -91,9 +93,20 @@ class DDIMPipeline:
         else: 
             hist = None
         
-        for t in tqdm(self.InferenceScheduler.timesteps):
+        if verbose:
+            prog = tqdm(self.InferenceScheduler.timesteps)
+        else:
+            prog = self.InferenceScheduler.timesteps
+        for t in prog:
             pred_noise = model(noise, t, **kwargs).sample
-                
+            
+            if conditioning_over_relaxation_factor is not None:
+                kwargs['unconditioned'] = True
+                pred_noise_uncond = model(noise, t, **kwargs).sample
+                kwargs['unconditioned'] = False
+                cond_delta = pred_noise - pred_noise_uncond
+                pred_noise = pred_noise_uncond + conditioning_over_relaxation_factor * cond_delta
+            
             denoised = self.InferenceScheduler.step(pred_noise, t, noise)
             pred = denoised.pred_original_sample
             
@@ -103,7 +116,7 @@ class DDIMPipeline:
                 alpha_bar = self.InferenceScheduler.alphas_cumprod[t]        # scalar tensor
                 beta_bar  = 1.0 - alpha_bar
                 
-                if static_guidance:
+                if static_guidance or t == self.TrainScheduler.config.num_train_timesteps-1:
                     mult = guidance_scale
                 else:
                     mult = guidance_scale * (beta_bar / alpha_bar).sqrt()
@@ -113,7 +126,10 @@ class DDIMPipeline:
                     noise = noise - mult * grads
                     
                 else:
-                    grad_eps  = -grads * (beta_bar / alpha_bar).sqrt()   # dε = −√β/α ∇x0
+                    if t == self.TrainScheduler.config.num_train_timesteps-1:
+                        grad_eps  = -grads
+                    else:
+                        grad_eps  = -grads * (beta_bar / alpha_bar).sqrt()   # dε = −√β/α ∇x0
                     noise_pred = pred_noise + guidance_scale * grad_eps
                     noise = self.InferenceScheduler.step(noise_pred, t, noise).prev_sample
             else:
