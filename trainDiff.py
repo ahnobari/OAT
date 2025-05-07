@@ -79,8 +79,8 @@ model = CTOPUNet(
     C_hidden_size = [256,256,256] if not args.ignore_vfs else [256,256],
     C_mapping_size = [128,128,128] if not args.ignore_vfs else [128,128],
     latent_size = 1280,
-    latent_shift=dataset.shift,
-    latent_scale=dataset.scale
+    latentShift=dataset.shift,
+    latentScale=dataset.scale
 )
 
 diffusion = DDIMPipeline()

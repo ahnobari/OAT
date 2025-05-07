@@ -3,11 +3,12 @@ from diffusers.models.unets.unet_2d import UNet2DOutput, TimestepEmbedding
 from ._models import ProblemEncoder
 import torch
 from typing import Optional, Tuple, Union
+from diffusers.configuration_utils import register_to_config
 from huggingface_hub import PyTorchModelHubMixin
 
 class CTOPUNet(UNet2DModel, PyTorchModelHubMixin):
+    @register_to_config
     def __init__(self,
-                 *args,
                  BCs = [4,4],
                  BC_n_layers = [4,4],
                  BC_hidden_size = [256,256], 
@@ -17,10 +18,10 @@ class CTOPUNet(UNet2DModel, PyTorchModelHubMixin):
                  C_hidden_size = [256,256],
                  C_mapping_size = [128,128],
                  latent_size = 256,
-                 latent_shift = 0,
-                 latent_scale = 1,
+                 latentShift = 0,
+                 latentScale = 1,
                  **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         
         self.problem_encoder = ProblemEncoder(
             BCs = BCs,
@@ -38,8 +39,8 @@ class CTOPUNet(UNet2DModel, PyTorchModelHubMixin):
         self.problem_embedding = TimestepEmbedding(latent_size, time_embed_dim)
         
         self.latent_size = latent_size
-        self.latent_shift = torch.nn.Parameter(torch.tensor([latent_shift]), requires_grad=False)
-        self.latent_scale = torch.nn.Parameter(torch.tensor([latent_scale]), requires_grad=False)
+        self.latent_shift = torch.nn.Parameter(torch.tensor([latentShift]), requires_grad=False)
+        self.latent_scale = torch.nn.Parameter(torch.tensor([latentScale]), requires_grad=False)
         
     def forward(
         self,
