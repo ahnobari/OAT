@@ -17,7 +17,7 @@ torch.autograd.set_grad_enabled(False)
 args = ArgumentParser()
 args.add_argument("--dataset", type=str, default="DOMTopoDiff", help="dataset name. Options: labeled, DOMTopoDiff")
 args.add_argument("--dataset_path", type=str, default="Dataset", help="path to dataset. default Dataset")
-args.add_argument("--jobs", type=int, default=32, help="number of jobs to run in parallel. default 32")
+args.add_argument("--jobs", type=int, default=1, help="number of jobs to run in parallel. default 1")
 args.add_argument("--samples_path", type=str, default=None, help="path to samples. Must be provided.")
 args.add_argument("--save_path", type=str, default="FEAResults", help="path to save results. default FEAResults")
 args.add_argument("--save_name", type=str, default="FEA.pkl", help="name of the saved results. default FEA.pkl")
@@ -37,7 +37,7 @@ with open(args.samples_path, 'rb') as f:
 
 def get_CE_VFE(sample):
     
-    top, vf, BCs, loads, shape, idx = sample
+    top, vf, BCs, loads, shape, r = sample
 
     mesh = StructuredMesh2D(shape[0], shape[1], shape[0]/max(shape), shape[1]/max(shape))
     material = SingleMaterial(volume_fraction=vf, update_rule='OC', heavyside=False, penalty_schedule=None, penalty=3)
@@ -51,19 +51,17 @@ def get_CE_VFE(sample):
     optimizer.add_BCs(BCs[:,0:2], BCs[:,2:].astype(np.bool_))
     optimizer.add_Forces(loads[:,0:2], loads[:,2:])
 
-    # plotter._plot_problem(rho=top)
-
     compliance_gt = float(optimizer.FEA_integrals(np.array(top>0.5))[-1])
     
-    n_samples = results[idx].shape[0]
+    n_samples = r.shape[0]
     
     comps = np.zeros(n_samples)
     vfes = np.zeros(n_samples)
     for i in range(n_samples):
-        comps[i] = float(optimizer.FEA_integrals(np.array(results[idx][i].flatten()>0.5))[-1])
-        vfes[i] = (results[idx][i]>0.5).sum() / results[idx][i].size
+        comps[i] = float(optimizer.FEA_integrals(np.array(r[i].flatten()>0))[-1])
+        vfes[i] = (r[i]>0).sum() / r[i].size
         vfes[i] -= vf
-        vfes[i] = np.abs(vfes[i]) / vf
+        vfes[i] = max(vfes[i] / vf, 0)
         
     CE = comps - compliance_gt
     CE /= compliance_gt
@@ -86,7 +84,7 @@ for i in tqdm(range(len(results))):
 
     vf = dataset.Cs[0][rnd_idx]
     
-    samples.append((top, vf, BCs, loads, shape, rnd_idx))
+    samples.append((top, vf, BCs, loads, shape, results[rnd_idx]))
 
 if args.jobs > 1:
     print('processing samples in parallel...')
