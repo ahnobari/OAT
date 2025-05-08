@@ -92,7 +92,7 @@ if args.mixed_precision:
             
             out = diffusion.inference(model, num_sampling_steps=args.num_sampling_steps, batch_size=len(batch), final_callable=latent_map, conditioning_over_relaxation_factor=args.guidance_scale, **Diff_batch)
             
-            results.append(out.reshape(B, batch_size, *out.shape[1:]))
+            results.append(out.reshape(-1, batch_size, *out.shape[1:]))
             
         results = np.concatenate(results, axis=0)
         
