@@ -51,17 +51,33 @@ def get_CE_VFE(sample):
     optimizer.add_BCs(BCs[:,0:2], BCs[:,2:].astype(np.bool_))
     optimizer.add_Forces(loads[:,0:2], loads[:,2:])
 
-    compliance_gt = float(optimizer.FEA_integrals(np.array(top>0.5))[-1])
+    try:
+        compliance_gt = float(optimizer.FEA_integrals(np.array(top>0.5))[-1])
     
+    except Exception as e:
+        print(f"Error occurred while computing compliance_gt")
+        n_samples = r.shape[0]
+        
+        compliance_gt = 0
+        comps = np.zeros(n_samples) + 1000
+        vfes = np.zeros(n_samples) + 1000
+        CE = np.zeros(n_samples) + 1000
+        return compliance_gt, comps, vfes, CE
+
     n_samples = r.shape[0]
     
     comps = np.zeros(n_samples)
     vfes = np.zeros(n_samples)
     for i in range(n_samples):
-        comps[i] = float(optimizer.FEA_integrals(np.array(r[i].flatten()>0))[-1])
-        vfes[i] = (r[i]>0).sum() / r[i].size
-        vfes[i] -= vf
-        vfes[i] = max(vfes[i] / vf, 0)
+        try:
+            comps[i] = float(optimizer.FEA_integrals(np.array(r[i].flatten()>0))[-1])
+            vfes[i] = (r[i]>0).sum() / r[i].size
+            vfes[i] -= vf
+            vfes[i] = max(vfes[i] / vf, 0)
+        except Exception as e:
+            print(f"Error occurred while computing compliance for sample {i}")
+            comps[i] = 1e12
+            vfes[i] = 1e12
         
     CE = comps - compliance_gt
     CE /= compliance_gt
