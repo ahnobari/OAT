@@ -1,4 +1,4 @@
-﻿"""
+"""
 GCMMA-MMA-Python
 
 This file is part of GCMMA-MMA-Python. GCMMA-MMA-Python is licensed under the terms of GNU 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 
 ORIGINAL SOURCE: https://github.com/arjendeetman/GCMMA-MMA-Python
 
