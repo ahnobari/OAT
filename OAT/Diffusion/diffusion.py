@@ -100,7 +100,7 @@ class DDIMPipeline:
         for t in prog:
             pred_noise = model(noise, t, **kwargs).sample
             
-            if conditioning_over_relaxation_factor is not None:
+            if conditioning_over_relaxation_factor is not None and conditioning_over_relaxation_factor != 1.0:
                 kwargs['unconditioned'] = True
                 pred_noise_uncond = model(noise, t, **kwargs).sample
                 kwargs['unconditioned'] = False
