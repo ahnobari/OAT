@@ -69,8 +69,8 @@ class DDIMPipeline:
                   batch_size: Optional[int] = 1,
                   guidance_function: Optional[Callable] = None,
                   guidance_scale: float = 1.0,
-                  static_guidance: bool = False,
-                  direct_guidance: bool = False,
+                  static_guidance: bool = True,
+                  direct_guidance: bool = True,
                   final_callable: Optional[Callable] = None,
                   history: bool = False,
                   verbose: bool = False,
@@ -136,10 +136,14 @@ class DDIMPipeline:
                 noise = denoised.prev_sample
                 
             if history:
-                hist.append({'x_0': (pred + 1) / 2 * model.latent_scale - model.latent_shift,
-                             'x_t': (noise + 1) / 2 * model.latent_scale - model.latent_shift,
-                             'X_0': final_callable((pred + 1) / 2 * model.latent_scale - model.latent_shift),
-                             'X_t': final_callable((noise + 1) / 2 * model.latent_scale - model.latent_shift)})
+                if final_callable is not None:
+                    hist.append({'x_0': (pred + 1) / 2 * model.latent_scale - model.latent_shift,
+                                'x_t': (noise + 1) / 2 * model.latent_scale - model.latent_shift,
+                                'X_0': final_callable((pred + 1) / 2 * model.latent_scale - model.latent_shift),
+                                'X_t': final_callable((noise + 1) / 2 * model.latent_scale - model.latent_shift)})
+                else:
+                    hist.append({'x_0': (pred + 1) / 2 * model.latent_scale - model.latent_shift,
+                                'x_t': (noise + 1) / 2 * model.latent_scale - model.latent_shift})
         
         noise = (noise + 1) / 2 * model.latent_scale - model.latent_shift
         

@@ -70,7 +70,7 @@ def get_CE_VFE(sample):
     vfes = np.zeros(n_samples)
     for i in range(n_samples):
         try:
-            comps[i] = float(optimizer.FEA_integrals(np.array(r[i].flatten()>0))[-1])
+            comps[i] = float(optimizer.FEA_integrals(r[i].flatten()>0)[-1])
             vfes[i] = (r[i]>0).sum() / r[i].size
             vfes[i] -= vf
             vfes[i] = max(vfes[i] / vf, 0)
