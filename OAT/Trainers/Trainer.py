@@ -255,7 +255,10 @@ class Trainer:
             if (self.current_epoch-1) % checkpoint_interval == 0:
                 pass
             elif self.is_main_process():
-                os.remove(os.path.join(checkpoint_dir, f'checkpoint_epoch_{self.current_epoch-1}.pth'))
+                try:
+                    os.remove(os.path.join(checkpoint_dir, f'checkpoint_epoch_{self.current_epoch-1}.pth'))
+                except:
+                    print(f"Checkpoint {self.current_epoch-1} not found or already deleted.")
 
         if self.DDP:
             dist.barrier()

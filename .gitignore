@@ -16,6 +16,8 @@ Checkpoints/*.pth
 Checkpoints/*/*.pth
 CheckpointsDiff*/*.pth
 CheckpointsDiff*/*/*.pth
+CheckpointsPhysx/*.pth
+CheckpointsPhysx*/*/*.pth
 *.out
 *.html
 log/*
