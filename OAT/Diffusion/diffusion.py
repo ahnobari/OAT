@@ -75,6 +75,9 @@ class DDIMPipeline:
                   history: bool = False,
                   verbose: bool = False,
                   conditioning_over_relaxation_factor: Optional[float] = None,
+                  ddpm : bool = False,
+                  low_rank: bool = False,
+                  tau: float = 0.99,
                   **kwargs):
         
         """
@@ -85,8 +88,10 @@ class DDIMPipeline:
         
         batch_size = noise.shape[0]
         
+        sched = self.InferenceScheduler if not ddpm else self.TrainScheduler
+        
         # Prepare the scheduler
-        self.InferenceScheduler.set_timesteps(num_sampling_steps)
+        sched.set_timesteps(num_sampling_steps)
         
         if history:
             hist = []
@@ -94,9 +99,12 @@ class DDIMPipeline:
             hist = None
         
         if verbose:
-            prog = tqdm(self.InferenceScheduler.timesteps)
+            prog = tqdm(sched.timesteps)
         else:
-            prog = self.InferenceScheduler.timesteps
+            prog = sched.timesteps
+            
+        st = 0
+        grads = None
         for t in prog:
             pred_noise = model(noise, t, **kwargs).sample
             
@@ -107,13 +115,32 @@ class DDIMPipeline:
                 cond_delta = pred_noise - pred_noise_uncond
                 pred_noise = pred_noise_uncond + conditioning_over_relaxation_factor * cond_delta
             
-            denoised = self.InferenceScheduler.step(pred_noise, t, noise)
+            denoised = sched.step(pred_noise, t, noise)
             pred = denoised.pred_original_sample
             
             if guidance_function is not None:
-                grads = guidance_function(denoised, t, history = hist, model = model, final_callable = final_callable, **kwargs)
-            
-                alpha_bar = self.InferenceScheduler.alphas_cumprod[t]        # scalar tensor
+                grads = guidance_function(denoised, t, history = hist, model = model, final_callable = final_callable, step=st, total_steps=num_sampling_steps, previous_grad = grads, **kwargs)
+
+                if low_rank:
+                    Z_t = denoised.prev_sample.clone().squeeze()
+                    # svd
+                    U, S, V = torch.svd(Z_t)
+                    
+                    eig = S.square().flatten()
+                    c = torch.cumsum(eig, dim=0)/torch.sum(eig)
+                    r = torch.min(torch.where(c>=tau)[0])
+                    
+                    U_r = U[:, :r]
+                    V_r = V[:r, :]
+                    
+                    G = grads.squeeze()
+                    G_ = U_r.T @ G @ V_r.T
+                    grad_r = U_r @ G_ @ V_r
+                    grad_r = grad_r.reshape(denoised.pred_original_sample.shape)
+                else:
+                    grad_r = grads
+                    
+                alpha_bar = sched.alphas_cumprod[t]        # scalar tensor
                 beta_bar  = 1.0 - alpha_bar
                 
                 if static_guidance or t == self.TrainScheduler.config.num_train_timesteps-1:
@@ -123,15 +150,17 @@ class DDIMPipeline:
                 
                 if direct_guidance:
                     noise = denoised.prev_sample
-                    noise = noise - mult * grads
+                    noise = noise - mult * grad_r
+                    # clip to [-1, 1]
+                    noise = torch.clamp(noise, -1, 1)
                     
                 else:
                     if t == self.TrainScheduler.config.num_train_timesteps-1:
-                        grad_eps  = -grads
+                        grad_eps  = -grad_r
                     else:
-                        grad_eps  = -grads * (beta_bar / alpha_bar).sqrt()   # dε = −√β/α ∇x0
+                        grad_eps  = -grad_r * (beta_bar / alpha_bar).sqrt()   # dε = −√β/α ∇x0
                     noise_pred = pred_noise + guidance_scale * grad_eps
-                    noise = self.InferenceScheduler.step(noise_pred, t, noise).prev_sample
+                    noise = sched.step(noise_pred, t, noise).prev_sample
             else:
                 noise = denoised.prev_sample
                 
@@ -144,7 +173,8 @@ class DDIMPipeline:
                 else:
                     hist.append({'x_0': (pred + 1) / 2 * model.latent_scale - model.latent_shift,
                                 'x_t': (noise + 1) / 2 * model.latent_scale - model.latent_shift})
-        
+
+            st += 1
         noise = (noise + 1) / 2 * model.latent_scale - model.latent_shift
         
         if final_callable is not None:

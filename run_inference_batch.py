@@ -39,6 +39,7 @@ args.add_argument('--ignore_vfs', action='store_true', help='Ignore vfs. Default
 args.add_argument("--seed", type=int, default=0, help="random seed. default 0")
 args.add_argument("--save_image", action="store_true", help="save a sample image of some generated samples")
 args.add_argument("--image_path", type=str, default="inference_run.png", help="path to save image. default inference_run.png")
+args.add_argument("--ddpm", action="store_true", help="use ddpm scheduler. default False")
 
 args = args.parse_args()
 
@@ -90,7 +91,7 @@ if args.mixed_precision:
             Diff_batch = dataset._collate_fn(batch)
             Diff_batch = Diff_batch.to('cuda')
             
-            out = diffusion.inference(model, num_sampling_steps=args.num_sampling_steps, batch_size=len(batch), final_callable=latent_map, conditioning_over_relaxation_factor=args.guidance_scale, **Diff_batch)
+            out = diffusion.inference(model, num_sampling_steps=args.num_sampling_steps, batch_size=len(batch), final_callable=latent_map, conditioning_over_relaxation_factor=args.guidance_scale, ddpm=args.ddpm, **Diff_batch)
             
             results.append(out.reshape(-1, batch_size, *out.shape[1:]))
             
@@ -119,7 +120,7 @@ else:
         Diff_batch = dataset._collate_fn(batch)
         Diff_batch = Diff_batch.to('cuda')
         
-        out = diffusion.inference(model, num_sampling_steps=args.num_sampling_steps, batch_size=len(batch), final_callable=latent_map, conditioning_over_relaxation_factor=args.guidance_scale, **Diff_batch)
+        out = diffusion.inference(model, num_sampling_steps=args.num_sampling_steps, batch_size=len(batch), final_callable=latent_map, conditioning_over_relaxation_factor=args.guidance_scale, ddpm=args.ddpm, **Diff_batch)
         
         results.append(out.reshape(-1, batch_size, *out.shape[1:]))
             

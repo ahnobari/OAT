@@ -69,6 +69,16 @@ class LatentPhysx(nn.Module, PyTorchModelHubMixin):
             return out, loss_dict
         
         return out
+    
+    def compute_similarity(self, sample, **kwargs):
+        out = self.forward(sample, **kwargs)
+        vision_latent = out['vision_latent']
+        problem_latent = out['problem_latent']
+        
+        # compute similarity
+        scores = torch.nn.functional.cosine_similarity(vision_latent, problem_latent)
+        
+        return scores
 
 class CLIPContrastiveLoss(nn.Module):
     def __init__(self):
