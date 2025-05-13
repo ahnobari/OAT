@@ -91,10 +91,15 @@ def get_CE_VFE(sample):
         rho = r[best_id].flatten().astype(np.float64)
         rho -= rho.min()
         rho /= rho.max()
-        hist = optimizer.optimize(rho_init = rho, save_rho_history=True)[-1]
-        
-        top_5 = hist["rho_history"][4]
-        top_10 = hist["rho_history"][9]
+        try:
+            hist = optimizer.optimize(rho_init = rho, save_rho_history=True)[-1]
+            
+            top_5 = hist["rho_history"][4]
+            top_10 = hist["rho_history"][9]
+        except Exception as e:
+            print(f"Error occurred while computing post-opt samples")
+            top_5 = rho.copy()
+            top_10 = rho.copy()
         
         try:
             comps[n_samples] = float(optimizer.FEA_integrals(top_5.flatten()>0.5)[-1])
@@ -238,3 +243,54 @@ if args.post_opt:
     print(f"Opt-5 VFE: {np.mean(opt_5_vfe):.4f} ± {np.std(opt_5_vfe):.4f} | {np.median(opt_5_vfe):.4f}")
     print(f"Opt-10 CE: {np.mean(opt_10_ce):.4f} ± {np.std(opt_10_ce):.4f} | {np.median(opt_10_ce):.4f}")
     print(f"Opt-10 VFE: {np.mean(opt_10_vfe):.4f} ± {np.std(opt_10_vfe):.4f} | {np.median(opt_10_vfe):.4f}")
+
+# save a json file with the results
+import json
+results = {
+    "CE": {
+        "mean": np.mean(best_ce),
+        "std": np.std(best_ce),
+        "median": np.median(best_ce)
+    },
+    "VFE": {
+        "mean": np.mean(best_vfe),
+        "std": np.std(best_vfe),
+        "median": np.median(best_vfe)
+    },
+    "FailRate": len(best_ce) / len(dataset)
+}
+
+if args.post_opt:
+    results["Opt-5"] = {
+        "CE": {
+            "mean": np.mean(opt_5_ce),
+            "std": np.std(opt_5_ce),
+            "median": np.median(opt_5_ce)
+        },
+        "VFE": {
+            "mean": np.mean(opt_5_vfe),
+            "std": np.std(opt_5_vfe),
+            "median": np.median(opt_5_vfe)
+        },
+        "FailRate": len(opt_5_ce) / len(dataset)
+    }
+    results["Opt-10"] = {
+        "CE": {
+            "mean": np.mean(opt_10_ce),
+            "std": np.std(opt_10_ce),
+            "median": np.median(opt_10_ce)
+        },
+        "VFE": {
+            "mean": np.mean(opt_10_vfe),
+            "std": np.std(opt_10_vfe),
+            "median": np.median(opt_10_vfe)
+        },
+        "FailRate": len(opt_10_ce) / len(dataset)
+    }
+
+with open(os.path.join(args.save_path, args.save_name.replace('.pkl', '.json')), 'w') as f:
+    json.dump(results, f)
+    
+print(f"Results saved to {os.path.join(args.save_path, args.save_name.replace('.pkl', '.json'))}")
+
+print(results)
