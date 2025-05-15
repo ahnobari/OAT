@@ -39,9 +39,8 @@ with open(args.samples_path, 'rb') as f:
 def get_CE_VFE(sample):
     
     top, vf, BCs, loads, shape, r = sample
-
     mesh = StructuredMesh2D(shape[0], shape[1], shape[0]/max(shape), shape[1]/max(shape))
-    material = SingleMaterial(volume_fraction=vf, update_rule='OC', heavyside=False, penalty_schedule=None, penalty=3)
+    material = SingleMaterial(volume_fraction=vf, update_rule='MMA', heavyside=False, penalty_schedule=None, penalty=3)
     kernel = StructuredStiffnessKernel(mesh)
     filter = StructuredFilter2D(mesh, 1.5)
     solver = CHOLMOD(kernel)
@@ -89,8 +88,8 @@ def get_CE_VFE(sample):
     if args.post_opt:
         best_id = np.argmin(comps[:-2])
         rho = r[best_id].flatten().astype(np.float64)
-        rho -= rho.min()
-        rho /= rho.max()
+        rho += 1
+        rho /= 2
         try:
             hist = optimizer.optimize(rho_init = rho, save_rho_history=True)[-1]
             
@@ -105,12 +104,12 @@ def get_CE_VFE(sample):
             comps[n_samples] = float(optimizer.FEA_integrals(top_5.flatten()>0.5)[-1])
             vfes[n_samples] = (top_5>0.5).sum() / top_5.size
             vfes[n_samples] -= vf
-            vfes[n_samples] = max(vfes[n_samples-2] / vf, 0)
+            vfes[n_samples] = max(vfes[n_samples] / vf, 0)
             
             comps[n_samples+1] = float(optimizer.FEA_integrals(top_10.flatten()>0.5)[-1])
             vfes[n_samples+1] = (top_10>0.5).sum() / top_10.size
             vfes[n_samples+1] -= vf
-            vfes[n_samples+1] = max(vfes[n_samples-1] / vf, 0)
+            vfes[n_samples+1] = max(vfes[n_samples+1] / vf, 0)
             
         except Exception as e:
             print(f"Error occurred while computing compliance for post-opt samples")
@@ -131,7 +130,7 @@ if not os.path.exists(args.save_path):
 print('processing samples...')
 samples = []
 
-for i in tqdm(range(len(results))):
+for i in tqdm(range(len(dataset))):
     rnd_idx = i
     top = dataset.tensors[rnd_idx].numpy().flatten()
     shape = dataset.tensors[rnd_idx].numpy().shape[1:]
@@ -159,7 +158,13 @@ else:
         if best_ce < 1:
             running_average = running_average + best_ce
             count += 1
-            prog.set_description_str(f"Best CE: {best_ce*100:.4f} | Running Average: {running_average/count*100:.4f}")
+            if args.post_opt:
+                best_id = np.argmin(fea_results[-1][3][:-2])
+                vfe_start = fea_results[-1][2][best_id]
+                vfe_end = fea_results[-1][2][-1]
+                prog.set_description_str(f"Best CE: {best_ce*100:.4f} | Running Average: {running_average/count*100:.4f} | VFE: {vfe_start*100:.4f} -> {vfe_end*100:.4f}")
+            else:
+                prog.set_description_str(f"Best CE: {best_ce*100:.4f} | Running Average: {running_average/count*100:.4f}")
         
         
 
