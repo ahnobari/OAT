@@ -12,7 +12,7 @@ from OAT.Models.NFAE import NFAE
 torch.set_float32_matmul_precision('high')
 
 args = ArgumentParser()
-args.add_argument("--dataset", type=str, default="labeled", help="dataset name. Options: labeled, pre_training")
+args.add_argument("--dataset", type=str, default="all", help="dataset name. Options: labeled, pre_training, all")
 args.add_argument("--dataset_path", type=str, default="Dataset", help="path to dataset. default Dataset")
 args.add_argument("--encoder_res", type=int, default=256, help="encoder resolution. default 256")
 args.add_argument("--patch_size", type=int, default=64, help="patch size. default 64")
