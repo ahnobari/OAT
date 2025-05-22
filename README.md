@@ -1,7 +1,8 @@
 # Optimize Any Topology
 This repository is the official implemantation of the OAT model for minimum compliance topology optimization.
 
-***ADD IMAGE***
+![image](https://github.com/user-attachments/assets/6200fa2c-0cd5-49af-897c-67688f28c446)
+
 
 ## Environment
 To run this code create a new python environment and run:
